@@ -208,6 +208,60 @@ it on a clone with `dvc pull` (or `dvc checkout` after the DVC cache has been
 obtained). Until a shared remote is configured, a fresh clone has the DVC
 pointer but cannot restore the Parquet content.
 
+## Phase 3.1 — Standalone Python and PySpark validation
+
+Spark development uses Python 3.11 and PySpark 4.0.x inside the existing
+`.venv`, with standalone local execution only. The Spark JVM requires a
+compatible Java installation; this setup was validated with Eclipse Temurin
+Java 21.0.13. It does not use Cloudera, a Hadoop distribution, HDFS, YARN,
+Hive, or a remote Spark cluster.
+
+Install Java 21 separately and set the Windows user `JAVA_HOME` to its JDK
+directory. If a VS Code terminal has not inherited that user setting, activate
+the JDK for that PowerShell process only:
+
+```powershell
+$env:JAVA_HOME = [Environment]::GetEnvironmentVariable("JAVA_HOME", "User")
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+java -version
+where.exe java
+```
+
+Activate the existing environment and install development dependencies:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+```
+
+Run the local validation against the DVC-managed Phase 2 Parquet file:
+
+```powershell
+python -m pipelines.spark.bts_validation
+```
+
+The reusable session defaults to `local[2]`, a 2 GB driver-memory setting
+where supported, two default/shuffle partitions, disabled Spark UI, and WARN
+logging. Override the master, driver memory, or log level with
+`FLIGHTPULSE_SPARK_MASTER`,
+`FLIGHTPULSE_SPARK_DRIVER_MEMORY`, and `FLIGHTPULSE_SPARK_LOG_LEVEL`. The
+application rejects non-local masters.
+Spark and Parquet scans still use memory and disk; on an 8 GB Windows laptop,
+keep concurrency low and avoid caching the full dataset.
+
+The Phase 2 Parquet contains a nanosecond `FlightDate` timestamp. Spark 4.0
+cannot infer that Parquet timestamp annotation, so the validation reader
+provides an explicit projection of the three verified numeric metric columns.
+This keeps the source file unchanged and is sufficient for the Phase 3.1
+validation; broader Spark processing will need an explicit compatible schema
+or a separately versioned conversion.
+
+The validation checks the Parquet schema and compares Spark-calculated counts
+with Phase 2: 547,271 total, 20,389 cancelled, 1,512 diverted, 525,370 eligible
+delay records, 122,508 delayed (`ArrDelay > 15`), and 402,862 non-delayed
+eligible records. Rows with a missing `ArrDelay` are not counted as either
+delayed or non-delayed.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and adjust values for local development.
