@@ -1,0 +1,239 @@
+#root {
+  min-height: 100vh;
+}
+
+.shell {
+  position: relative;
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 82% 28%, rgb(38 115 108 / 14%), transparent 36%),
+    radial-gradient(ellipse at 16% 78%, rgb(18 70 81 / 17%), transparent 34%),
+    #071116;
+}
+
+.shell::before {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgb(169 209 211 / 3%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(169 209 211 / 3%) 1px, transparent 1px);
+  background-size: 64px 64px;
+  content: "";
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+  pointer-events: none;
+}
+
+.topbar,
+.hero,
+.footer {
+  position: relative;
+  z-index: 1;
+}
+
+.topbar {
+  display: flex;
+  height: 82px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8.2%;
+  border-bottom: 1px solid rgb(186 211 213 / 9%);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: #eaf3f3;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgb(85 219 194 / 55%);
+  border-radius: 9px;
+  color: var(--teal);
+  font-size: 11px;
+  letter-spacing: -0.5px;
+}
+
+.brand-live {
+  margin-left: -5px;
+  color: var(--teal);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+}
+
+.topbar-label,
+.eyebrow,
+.footer {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+.topbar-label {
+  color: #82939b;
+}
+
+.hero {
+  width: min(660px, 84%);
+  margin: auto;
+  padding: 105px 0 120px;
+  transform: translateY(-12px);
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--teal);
+}
+
+.eyebrow-line {
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: var(--teal);
+}
+
+h1 {
+  margin: 31px 0 20px;
+  color: #edf4f4;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: clamp(48px, 8vw, 76px);
+  font-weight: 600;
+  letter-spacing: -5px;
+  line-height: 1.07;
+}
+
+h1 span {
+  color: #80dbc9;
+}
+
+.hero-copy {
+  max-width: 440px;
+  margin: 0;
+  color: #9cabb0;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.service-card {
+  display: flex;
+  width: min(440px, 100%);
+  min-height: 75px;
+  align-items: center;
+  gap: 13px;
+  margin-top: 40px;
+  padding: 15px 19px;
+  border: 1px solid rgb(184 213 213 / 13%);
+  border-radius: 10px;
+  background: rgb(12 27 33 / 80%);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.status-checking {
+  background: #d3b46b;
+  box-shadow: 0 0 12px rgb(211 180 107 / 38%);
+}
+
+.status-online {
+  background: var(--teal);
+  box-shadow: 0 0 12px rgb(85 219 194 / 45%);
+}
+
+.status-offline {
+  background: #e58b7f;
+  box-shadow: 0 0 12px rgb(229 139 127 / 38%);
+}
+
+.service-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.service-title {
+  overflow: hidden;
+  color: #e4eeee;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-detail {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.status-label-checking {
+  color: #d3b46b;
+}
+
+.status-label-online {
+  color: var(--teal);
+}
+
+.status-label-offline {
+  color: #e58b7f;
+}
+
+.footer {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8.2%;
+  border-top: 1px solid rgb(186 211 213 / 9%);
+  color: #6f8189;
+  font-size: 8px;
+  letter-spacing: 1.6px;
+}
+
+@media (max-width: 560px) {
+  .topbar,
+  .footer {
+    padding-right: 7%;
+    padding-left: 7%;
+  }
+
+  .topbar-label {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+
+  h1 {
+    letter-spacing: -3px;
+  }
+
+  .footer {
+    gap: 16px;
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+}
