@@ -179,6 +179,35 @@ Run the pipeline tests with:
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+## DVC — processed BTS dataset
+
+The January 2024 Parquet dataset is versioned with DVC metadata while the
+dataset itself remains ignored by Git. Install the development tools and
+initialize DVC only once per clone:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\dvc.exe init
+.\.venv\Scripts\dvc.exe add data/processed/bts_ontime_2024_01.parquet
+```
+
+Commit `.dvc/`, `data/processed/bts_ontime_2024_01.parquet.dvc`, and
+`.gitignore`; do not force-add the Parquet binary. Check the tracked dataset
+state with:
+
+```powershell
+.\.venv\Scripts\dvc.exe status
+.\.venv\Scripts\dvc.exe diff
+```
+
+DVC stores content-addressed copies in the local `.dvc/cache/` directory by
+default. This local cache is ignored and is not shared with GitHub. To make
+the data available to other machines, configure an authenticated DVC remote
+storage location in a later setup, push the cache with `dvc push`, and restore
+it on a clone with `dvc pull` (or `dvc checkout` after the DVC cache has been
+obtained). Until a shared remote is configured, a fresh clone has the DVC
+pointer but cannot restore the Parquet content.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and adjust values for local development.

@@ -43,6 +43,11 @@ pnpm-debug.log*
 
 # Data, model artifacts, and local databases
 /data/
+!/data/
+/data/*
+!/data/processed/
+/data/processed/*
+!/data/processed/bts_ontime_2024_01.parquet.dvc
 /reports/
 !/reports/
 /reports/*
