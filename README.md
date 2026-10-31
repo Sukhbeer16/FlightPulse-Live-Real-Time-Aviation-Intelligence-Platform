@@ -4,11 +4,11 @@ FlightPulse Live is an incremental aviation intelligence platform for live
 aircraft tracking, historical flight-data processing, delay prediction,
 anomaly detection, and disruption analysis.
 
-The initial version is deliberately small: a FastAPI health endpoint and a
-React frontend that checks the backend. Kafka, Spark, Hadoop, PostgreSQL, and
-ML dependencies are not installed or started by default. Add each component
-only when its development phase requires it, which keeps the local setup
-practical on an 8 GB laptop.
+The application starts with a FastAPI health endpoint and a React frontend
+that checks the backend. PySpark is installed in the development environment
+for local historical analytics, but Spark is only started when that pipeline
+is run. Kafka, Hadoop, PostgreSQL, and ML infrastructure are not started by
+default; add each service only when its development phase requires it.
 
 ## Project layout
 
@@ -249,18 +249,26 @@ application rejects non-local masters.
 Spark and Parquet scans still use memory and disk; on an 8 GB Windows laptop,
 keep concurrency low and avoid caching the full dataset.
 
-The Phase 2 Parquet contains a nanosecond `FlightDate` timestamp. Spark 4.0
-cannot infer that Parquet timestamp annotation, so the validation reader
-provides an explicit projection of the three verified numeric metric columns.
-This keeps the source file unchanged and is sufficient for the Phase 3.1
-validation; broader Spark processing will need an explicit compatible schema
-or a separately versioned conversion.
+The Phase 2 Parquet contains a nanosecond `FlightDate` timestamp, which Spark
+4.0 cannot infer here. The Phase 3.1 validator reads an explicit projection of
+the verified numeric metric columns. Phase 3.2 likewise uses an explicit
+projection of its required fields, leaving the source unchanged; full-schema
+Spark processing still requires a compatible conversion strategy.
 
 The validation checks the Parquet schema and compares Spark-calculated counts
 with Phase 2: 547,271 total, 20,389 cancelled, 1,512 diverted, 525,370 eligible
 delay records, 122,508 delayed (`ArrDelay > 15`), and 402,862 non-delayed
 eligible records. Rows with a missing `ArrDelay` are not counted as either
 delayed or non-delayed.
+
+## Phase 3.2 — Historical Spark analytics
+
+The standalone local PySpark analytics engine produces airline, origin and
+destination airport, route, hourly, weekday, and delay-distribution Parquet
+tables without modifying the source dataset. See
+[`docs/phase3.2-historical-analytics.md`](docs/phase3.2-historical-analytics.md)
+for metric definitions, validation results, Windows compatibility details,
+and the exact rerun command.
 
 ## Configuration
 
@@ -274,10 +282,10 @@ secrets in frontend variables because Vite exposes them to browser code.
 - Run the API and frontend first; they do not require infrastructure services.
 - Use small, representative samples for data-processing work and avoid
   committing datasets or trained model files.
-- Begin with local Python processing. Adopt Spark local mode only when the
-  workload benefits from it.
-- Introduce PostgreSQL, Kafka, Spark, and Hadoop/Hive individually, and stop
-  each service when it is not in use. See the [development roadmap](docs/development-roadmap.md)
+- Use Spark local mode only for work that benefits from it, and stop it when
+  the batch job is complete.
+- Introduce PostgreSQL, Kafka, and Hadoop/Hive individually, and stop each
+  service when it is not in use. See the [development roadmap](docs/development-roadmap.md)
   and [architecture](docs/architecture.md).
 
 ## Data and credentials
