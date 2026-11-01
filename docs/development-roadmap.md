@@ -48,7 +48,32 @@ from API/provider failures.
 ## Phase 4 — Delay prediction
 
 - Define a prediction target, time horizon, and leakage-safe evaluation split.
-- Establish a simple baseline before testing scikit-learn or XGBoost models.
+- Phase 4.1 prepares an allowlisted, leakage-audited BTS feature dataset with
+  train-only missing-value imputation and chronological date partitions; it
+  does not train a model.
+- Phase 4.1.5 annual expansion is deferred. January and validated February
+  2024 are available; the March download is incomplete, and no annual dataset
+  has been produced.
+- Phase 4.1.6 creates a separate January-February feature dataset using the
+  existing 21-feature leakage-safe allowlist, train-only medians, and
+  date-grouped chronological train/validation/test partitions. It does not
+  train a model.
+- Phase 4.2 compares Logistic Regression, Decision Tree, Random Forest, and
+  XGBoost baselines. It uses sparse one-hot categorical preprocessing, selects
+  by validation performance, and evaluates the selected candidate once on
+  the held-out test partition.
+- Phase 4.3 explains the saved Phase 4.2 models and analyzes errors,
+  probability thresholds, groups, and calibration on validation data only.
+  The final test partition remains untouched; generated reports and plots are
+  Git-ignored.
+- Phase 4.2.1 performs bounded, sequential randomized hyperparameter searches
+  for the four existing classifiers using chronological inner partitions
+  within training only, then refits on the full training partition and
+  reports results on the existing external validation partition. It does not
+  access the final test partition.
+- The two-month holdout does not establish seasonal or year-over-year
+  generalization. Evaluate against later months/years before making those
+  claims.
 - Version data/metrics and introduce MLflow only if experiment tracking is
   useful for the workflow.
 - Serve predictions only after evaluation and freshness requirements are met.

@@ -58,8 +58,11 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _validate_bts_archive(archive_path: Path) -> None:
-    """Verify ZIP CRCs and the unique January 2024 BTS CSV member."""
+def _validate_bts_archive(
+    archive_path: Path,
+    expected_csv: str = EXPECTED_ARCHIVE_CSV,
+) -> None:
+    """Verify ZIP CRCs and the unique expected BTS CSV member."""
     try:
         with zipfile.ZipFile(archive_path) as archive:
             corrupt_member = archive.testzip()
@@ -70,10 +73,10 @@ def _validate_bts_archive(archive_path: Path) -> None:
                 for member in archive.infolist()
                 if not member.is_dir() and member.filename.lower().endswith(".csv")
             ]
-            if csv_members != [EXPECTED_ARCHIVE_CSV]:
+            if csv_members != [expected_csv]:
                 raise ValueError(
-                    "Expected exactly the January 2024 BTS CSV member "
-                    f"{EXPECTED_ARCHIVE_CSV!r}; found {csv_members!r}."
+                    f"Expected exactly the BTS CSV member {expected_csv!r}; "
+                    f"found {csv_members!r}."
                 )
     except (OSError, zipfile.BadZipFile) as exc:
         raise ValueError(f"Invalid or incomplete ZIP archive: {exc}") from exc
@@ -167,12 +170,17 @@ def _replace_partial_from_staged(
         raise
 
 
-def download_archive(destination: Path, timeout: int = 60) -> Path:
+def download_archive(
+    destination: Path,
+    timeout: int = 60,
+    source_url: str = SOURCE_URL,
+    expected_csv: str = EXPECTED_ARCHIVE_CSV,
+) -> Path:
     """Download BTS data with validated, ETag-protected resumable requests."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         try:
-            _validate_bts_archive(destination)
+            _validate_bts_archive(destination, expected_csv)
         except ValueError as exc:
             raise RuntimeError(
                 f"Refusing to overwrite existing invalid archive {destination}: {exc}"
@@ -235,7 +243,7 @@ def download_archive(destination: Path, timeout: int = 60) -> Path:
                 headers["If-Range"] = stored_etag
             elif stored_last_modified:
                 headers["If-Range"] = stored_last_modified
-        request = urllib.request.Request(SOURCE_URL, headers=headers)
+        request = urllib.request.Request(source_url, headers=headers)
         restart = False
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -400,7 +408,7 @@ def download_archive(destination: Path, timeout: int = 60) -> Path:
                 and (stored_total is None or stored_total == reported_total)
             ):
                 try:
-                    _validate_bts_archive(partial)
+                    _validate_bts_archive(partial, expected_csv)
                 except ValueError:
                     pass
                 else:
@@ -457,7 +465,7 @@ def download_archive(destination: Path, timeout: int = 60) -> Path:
                 f"verified partial retained at {partial}."
             )
         try:
-            _validate_bts_archive(partial)
+            _validate_bts_archive(partial, expected_csv)
         except ValueError as exc:
             if restarts:
                 raise RuntimeError(
@@ -478,14 +486,19 @@ def download_archive(destination: Path, timeout: int = 60) -> Path:
     )
 
 
-def extract_bts_csv(archive_path: Path, raw_directory: Path) -> Path:
+def extract_bts_csv(
+    archive_path: Path,
+    raw_directory: Path,
+    expected_csv: str = EXPECTED_ARCHIVE_CSV,
+    target_path: Path | None = None,
+) -> Path:
     """Extract only the archive's CSV member without modifying its ZIP source."""
     try:
-        _validate_bts_archive(archive_path)
+        _validate_bts_archive(archive_path, expected_csv)
     except ValueError as exc:
         raise RuntimeError(f"Refusing to extract invalid BTS archive: {exc}") from exc
 
-    target = raw_directory / CSV_NAME
+    target = target_path or raw_directory / CSV_NAME
     if target.exists():
         provenance_path = target.with_name(target.name + ".provenance.json")
         if provenance_path.exists():
@@ -515,12 +528,12 @@ def extract_bts_csv(archive_path: Path, raw_directory: Path) -> Path:
                 if not member.is_dir() and member.filename.lower().endswith(".csv")
             ]
             member_names = [member.filename for member in members]
-            if member_names != [EXPECTED_ARCHIVE_CSV]:
+            if member_names != [expected_csv]:
                 raise ValueError(
-                    "Expected exactly the January 2024 BTS CSV member "
-                    f"{EXPECTED_ARCHIVE_CSV!r}; found {member_names!r}."
+                    f"Expected exactly the BTS CSV member {expected_csv!r}; "
+                    f"found {member_names!r}."
                 )
-            selected = EXPECTED_ARCHIVE_CSV
+            selected = expected_csv
             partial = target.with_name(target.name + ".part")
             with archive.open(selected) as source, partial.open("wb") as output:
                 shutil.copyfileobj(source, output, length=CHUNK_SIZE_BYTES)

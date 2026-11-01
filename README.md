@@ -28,7 +28,8 @@ backend/
   tests/
 pipelines/
   ingestion/            BTS download, validation, cleaning, and features
-tests/                  Data pipeline unit/integration tests
+  ml/                   Leakage-safe ML dataset preparation
+tests/                Data pipeline unit/integration tests
 data/
   raw/                   Ignored original archives and CSVs
   processed/             Ignored derived Parquet files
@@ -269,6 +270,89 @@ tables without modifying the source dataset. See
 [`docs/phase3.2-historical-analytics.md`](docs/phase3.2-historical-analytics.md)
 for metric definitions, validation results, Windows compatibility details,
 and the exact rerun command.
+
+## Phase 4.1 — ML dataset preparation
+
+Build the leakage-safe, chronologically split January 2024 delay-prediction
+dataset without training a model:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.ml.feature_dataset
+```
+
+The generated Parquet dataset and manifest are ignored under
+`data/processed/ml/`. See
+[`docs/phase4.1-ml-dataset-preparation.md`](docs/phase4.1-ml-dataset-preparation.md)
+for the target and eligibility rules, feature allowlist, leakage exclusions,
+split counts, and limitations.
+
+## Phase 4.1.5 — Historical BTS expansion (deferred)
+
+Annual expansion is deferred. February 2024 was acquired and validated, while
+the March download remains incomplete and is not used. No annual dataset or
+annual feature dataset has been completed.
+
+## Phase 4.1.6 — Combined January–February ML features
+
+Build a separate, leakage-safe feature dataset from the existing January and
+February BTS Parquet files without training a model:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.ml.combined_feature_dataset
+```
+
+The generated Parquet and manifest are Git-ignored under
+`data/processed/ml/`; January-only artifacts remain unchanged. Review
+[`docs/phase4.1.6-combined-ml-feature-dataset.md`](docs/phase4.1.6-combined-ml-feature-dataset.md)
+for eligibility, the 21-feature allowlist, leakage exclusions, verified counts,
+date split boundaries, and train-only imputation details.
+
+## Phase 4.2 — Delay model training and evaluation
+
+Train the Logistic Regression, Decision Tree, Random Forest, and XGBoost
+baselines on the combined dataset, select using validation results, then test
+the selected candidate once:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.ml.train_models
+```
+
+Artifacts and evaluation reports are Git-ignored under
+`data/processed/ml/phase4_2/`. See
+[`docs/phase4.2-model-training.md`](docs/phase4.2-model-training.md) for
+preprocessing, selection criteria, results, limitations, and reproducibility.
+
+## Phase 4.3 — Explainability and validation error analysis
+
+Analyze the saved Phase 4.2 pipelines using validation data only:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.ml.explain_models
+```
+
+Outputs are Git-ignored under `data/processed/ml/phase4_3/`. The analysis
+preserves Phase 4.2 artifacts, does not load the test partition, and records
+feature importance, subgroup errors, threshold trade-offs, calibration, and
+XGBoost early-stopping evidence. See
+[`docs/phase4.3-model-explainability.md`](docs/phase4.3-model-explainability.md)
+for methodology, measured findings, limitations, and artifact details.
+
+## Phase 4.2.1 — Hyperparameter optimization
+
+Run bounded, chronological randomized searches for the four existing model
+families:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines.ml.optimize_models
+```
+
+The searches use only January 1–February 11 training data, with an internal
+February 1 cutoff and February 2–11 inner validation. Refitted candidates are
+evaluated on the February 12–20 external validation partition; the final test
+partition remains untouched. Outputs are Git-ignored under
+`data/processed/ml/phase4_2_improvements/`. See
+[`docs/phase4.2.1-model-improvement.md`](docs/phase4.2.1-model-improvement.md)
+for search spaces, measured results, and resource/preservation checks.
 
 ## Configuration
 

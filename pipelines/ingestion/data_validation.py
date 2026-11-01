@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
 import sqlite3
@@ -73,7 +74,12 @@ def _read_header(path: Path) -> list[str]:
         raise ValueError(f"Unable to read CSV header from {path}: {exc}") from exc
 
 
-def validate_csv(path: Path, chunksize: int = 50_000) -> dict[str, Any]:
+def validate_csv(
+    path: Path,
+    chunksize: int = 50_000,
+    year: int = 2024,
+    month: int = 1,
+) -> dict[str, Any]:
     """Inspect schema, nulls, duplicates, types, dates, and numeric ranges.
 
     The scanner holds at most one pandas chunk plus a disk-backed set of row
@@ -81,6 +87,13 @@ def validate_csv(path: Path, chunksize: int = 50_000) -> dict[str, Any]:
     """
     if chunksize < 1:
         raise ValueError("chunksize must be a positive integer.")
+    if year < 1987 or not 1 <= month <= 12:
+        raise ValueError("Expected a valid BTS reporting year and month.")
+    period_start = pd.Timestamp(year=year, month=month, day=1)
+    last_day = calendar.monthrange(year, month)[1]
+    period_end = pd.Timestamp(year=year, month=month, day=last_day) + pd.Timedelta(
+        days=1, microseconds=-1
+    )
     columns = _read_header(path)
     missing_required = sorted(REQUIRED_COLUMNS.difference(columns))
     if missing_required:
@@ -139,8 +152,8 @@ def validate_csv(path: Path, chunksize: int = 50_000) -> dict[str, Any]:
                         (
                             dates.notna()
                             & ~dates.between(
-                                pd.Timestamp("2024-01-01"),
-                                pd.Timestamp("2024-01-31 23:59:59.999999"),
+                                period_start,
+                                period_end,
                             )
                         ).sum()
                     )
@@ -223,6 +236,8 @@ def validate_csv(path: Path, chunksize: int = 50_000) -> dict[str, Any]:
         "duplicate_rows": total_rows - unique_count,
         "invalid_date_rows": invalid_date_rows,
         "out_of_scope_date_rows": out_of_scope_rows,
+        "reporting_year": year,
+        "reporting_month": month,
         "missing_values": dict(sorted(missing_values.items())),
         "invalid_values": dict(sorted(invalid_values.items())),
         "column_types": {
@@ -236,8 +251,12 @@ def write_quality_report(report: dict[str, Any], output_path: Path) -> None:
     """Write a reproducible Markdown summary based only on measured input."""
     missing = report["missing_values"]
     invalid = report["invalid_values"]
+    period = (
+        f"{report.get('reporting_year', 2024):04d}-"
+        f"{report.get('reporting_month', 1):02d}"
+    )
     lines = [
-        "# BTS January 2024 data quality report",
+        f"# BTS {period} data quality report",
         "",
         f"- **Input file:** `{report['file_name']}`",
         f"- **Validated (UTC):** {report['validated_at_utc']}",
@@ -252,7 +271,7 @@ def write_quality_report(report: dict[str, Any], output_path: Path) -> None:
         f"- **Unique rows:** {report['unique_rows']:,}",
         f"- **Duplicate rows after first occurrence:** {report['duplicate_rows']:,}",
         f"- **Unparseable non-empty dates:** {report['invalid_date_rows']:,}",
-        f"- **Rows outside January 2024:** {report['out_of_scope_date_rows']:,}",
+        f"- **Rows outside {period}:** {report['out_of_scope_date_rows']:,}",
         "",
         "## Missing values",
         "",

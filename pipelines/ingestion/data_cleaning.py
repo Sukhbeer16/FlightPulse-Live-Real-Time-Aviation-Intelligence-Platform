@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -43,7 +44,11 @@ TIME_COLUMNS = {"CRSDepTime", "DepTime", "CRSArrTime", "ArrTime"}
 BOOLEAN_COLUMNS = {"Cancelled", "Diverted"}
 
 
-def clean_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
+def clean_dataframe(
+    frame: pd.DataFrame,
+    year: int = 2024,
+    month: int = 1,
+) -> pd.DataFrame:
     """Clean one chunk without imputing source values or altering the raw file.
 
     Invalid dates, out-of-scope dates, and missing flight identity fields are
@@ -86,8 +91,15 @@ def clean_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
         )
         result.loc[~valid_time, column] = pd.NA
 
-    in_january_2024 = result["FlightDate"].between(
-        pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-31 23:59:59.999999")
+    if year < 1987 or not 1 <= month <= 12:
+        raise ValueError("Expected a valid BTS reporting year and month.")
+    period_start = pd.Timestamp(year=year, month=month, day=1)
+    last_day = calendar.monthrange(year, month)[1]
+    period_end = pd.Timestamp(year=year, month=month, day=last_day) + pd.Timedelta(
+        days=1, microseconds=-1
+    )
+    in_period = result["FlightDate"].between(
+        period_start, period_end
     )
     identity_present = (
         result["Reporting_Airline"].notna()
@@ -97,7 +109,7 @@ def clean_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
         & result["Dest"].notna()
         & result["Dest"].ne("")
     )
-    result = result.loc[result["FlightDate"].notna() & in_january_2024 & identity_present]
+    result = result.loc[result["FlightDate"].notna() & in_period & identity_present]
     result = result.drop_duplicates(keep="first")
 
     if result.empty:
