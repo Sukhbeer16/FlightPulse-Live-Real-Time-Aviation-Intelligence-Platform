@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@theme {
+  --color-fp-bg-primary: #080D18;
+  --color-fp-bg-secondary: #101827;
+  --color-fp-bg-card: #131E2E;
+  --color-fp-bg-elevated: #1A2640;
+  --color-fp-accent: #25BCEB;
+  --color-fp-accent-2: #4285F4;
+  --color-fp-accent-dim: rgba(37, 188, 235, 0.15);
+  --color-fp-text: #F1F5F9;
+  --color-fp-text-2: #94A3B8;
+  --color-fp-text-muted: #475569;
+  --color-fp-border: rgba(241, 245, 249, 0.1);
+  --color-fp-border-subtle: rgba(241, 245, 249, 0.06);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius-fp: 12px;
+  --radius-fp-sm: 8px;
+}
+
+/* ─── Design Tokens ──────────────────────────── */
+
+:root {
+  --bg-primary: #080D18;
+  --bg-secondary: #101827;
+  --bg-card: #131E2E;
+  --bg-elevated: #1A2640;
+  --accent-primary: #25BCEB;
+  --accent-secondary: #4285F4;
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-muted: #475569;
+  --border-subtle: rgba(241, 245, 249, 0.06);
+  --border-default: rgba(241, 245, 249, 0.1);
+  --border-accent: rgba(37, 188, 235, 0.25);
+}
+
+/* ─── Base ───────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ─── Scrollbar ──────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(241, 245, 249, 0.12);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(241, 245, 249, 0.2);
+}
+
+/* ─── MapLibre overrides ─────────────────────── */
+
+.maplibregl-map {
+  border-radius: 12px;
+  font-family: inherit;
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(8, 13, 24, 0.7) !important;
+  color: rgba(241, 245, 249, 0.35) !important;
+  font-size: 9px !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: rgba(37, 188, 235, 0.5) !important;
+}
+
+.maplibregl-ctrl-logo {
+  display: none !important;
+}
+
+/* ─── Recharts overrides ─────────────────────── */
+
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+/* ─── Utility Classes ────────────────────────── */
+
+.fp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+
+.fp-glass {
+  background: rgba(19, 30, 46, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(241, 245, 249, 0.08);
+}
+
+.rounded-fp {
+  border-radius: 12px;
+}
+
+.rounded-fp-sm {
+  border-radius: 8px;
+}
+
+/* ─── Animations ─────────────────────────────── */
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes radar-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-radar {
+  animation: radar-sweep 3s linear infinite;
+  transform-origin: center;
+}
