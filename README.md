@@ -352,7 +352,10 @@ evaluated on the February 12–20 external validation partition; the final test
 partition remains untouched. Outputs are Git-ignored under
 `data/processed/ml/phase4_2_improvements/`. See
 [`docs/phase4.2.1-model-improvement.md`](docs/phase4.2.1-model-improvement.md)
-for search spaces, measured results, and resource/preservation checks.
+for search spaces, measured results, resource-limited trial counts, and
+preservation checks. Validation AP improved only slightly for the Decision
+Tree and Random Forest candidates and declined for Logistic Regression and
+XGBoost; no general or production-ready improvement is established.
 
 ## Configuration
 

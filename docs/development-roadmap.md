@@ -69,8 +69,11 @@ from API/provider failures.
 - Phase 4.2.1 performs bounded, sequential randomized hyperparameter searches
   for the four existing classifiers using chronological inner partitions
   within training only, then refits on the full training partition and
-  reports results on the existing external validation partition. It does not
-  access the final test partition.
+  reports results on the existing external validation partition. The
+  Random Forest and XGBoost searches were capped early after measured
+  per-trial runtimes exceeded the laptop resource budget; skipped trials are
+  recorded. Results are not a general improvement claim, and the final test
+  partition remains untouched.
 - The two-month holdout does not establish seasonal or year-over-year
   generalization. Evaluate against later months/years before making those
   claims.
