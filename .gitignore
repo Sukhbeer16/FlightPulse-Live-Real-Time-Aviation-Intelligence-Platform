@@ -60,6 +60,8 @@ pnpm-debug.log*
 **/datasets/
 /models/
 **/models/
+!/backend/app/database/models/
+!/backend/app/database/models/*.py
 /artifacts/
 *.parquet
 *.avro
