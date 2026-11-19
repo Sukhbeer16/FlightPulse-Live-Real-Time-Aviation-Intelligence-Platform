@@ -129,13 +129,24 @@ def test_duplicate_expected_csv_member_names_are_rejected(tmp_path, monkeypatch)
 
 
 def test_zip_crc_failure_is_rejected(tmp_path, monkeypatch):
-    path = _valid_carrier_zip(tmp_path / "crc.zip", [_carrier_row()])
+    member_name = EXPECTED_CSV_MEMBER[CARRIER_DECODE_DATASET]
+    csv_content = _csv_bytes(CARRIER_DECODE_HEADERS, [_carrier_row()])
+    path = tmp_path / "crc.zip"
+    # Use ZIP_STORED so changing a source byte necessarily changes the
+    # uncompressed CSV instead of potentially changing an irrelevant DEFLATE
+    # control or padding bit.
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr(member_name, csv_content)
+
     with zipfile.ZipFile(path, "r") as archive:
-        info = archive.getinfo(EXPECTED_CSV_MEMBER[CARRIER_DECODE_DATASET])
+        info = archive.getinfo(member_name)
     payload = bytearray(path.read_bytes())
-    filename_length, extra_length = struct.unpack_from("<HH", payload, info.header_offset + 26)
+    filename_length, extra_length = struct.unpack_from(
+        "<HH", payload, info.header_offset + 26
+    )
     data_offset = info.header_offset + 30 + filename_length + extra_length
-    payload[data_offset] ^= 0x01
+    value_offset = csv_content.index(b"Mackey International")
+    payload[data_offset + value_offset] ^= 0x01
     path.write_bytes(payload)
     _set_expected_checksum(monkeypatch, CARRIER_DECODE_DATASET, path)
 

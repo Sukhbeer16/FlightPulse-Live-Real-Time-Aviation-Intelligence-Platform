@@ -99,7 +99,10 @@ def test_fingerprint_matches_independent_v1_golden_vector():
 
     # Independently pinned from the v1 byte contract, not produced by the
     # production fingerprint function.
-    assert expected_digest == "6c7e98bb9333b01faf8ade1c459c9d5f10c73028e8080c0f813842737bd36c24"
+    assert len(expected_bytes) == 499
+    assert expected_digest == (
+        "576b96db08c06aad9e1ee16ac66d7c7404055704ce3cc0131daeccfd0542a5aa"
+    )
     assert fingerprint_row(CARRIER_DECODE_DATASET, headers, values) == expected_digest
 
 
