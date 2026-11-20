@@ -50,9 +50,10 @@ frontend/
 - Node.js 20 LTS or newer, with npm
 - Windows PowerShell (commands below use PowerShell syntax)
 
-The API and frontend run without credentials, flight data, or infrastructure
-services. The historical-data pipeline requires the official BTS download or
-a manually exported BTS CSV.
+Process health and the Vite frontend start independently. Database-backed
+catalog and flight endpoints require a configured local PostgreSQL connection;
+historical analytics use the compact generated Parquet aggregates. Live state
+vectors use OpenSky and are subject to its availability and rate limits.
 
 ## Setup
 
@@ -85,9 +86,12 @@ Start the backend in one terminal from the repository root:
 .\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload
 ```
 
-The API is available at `http://127.0.0.1:8000`; its health endpoint is
-`http://127.0.0.1:8000/health` and interactive API documentation is at
-`http://127.0.0.1:8000/docs`.
+The API is available at `http://127.0.0.1:8000`; process health is at
+`http://127.0.0.1:8000/health`, database health is at
+`http://127.0.0.1:8000/api/v1/health/database`, and interactive API
+documentation is at `http://127.0.0.1:8000/docs`. See
+[`docs/backend-api.md`](docs/backend-api.md) for endpoint contracts and
+historical/live-data limitations.
 
 Start the frontend in a second terminal:
 

@@ -16,10 +16,14 @@ export function AppRouter() {
     <AnimatePresence mode="wait">
       <Routes>
         <Route element={<AppLayout />}>
-          <Route index element={<OverviewPage />} />
+          {/* Primary screen is Live Flight Tracker */}
+          <Route index element={<LiveTrackingPage />} />
           <Route path="live-tracking" element={<LiveTrackingPage />} />
+          <Route path="overview" element={<OverviewPage />} />
+          <Route path="intelligence" element={<OverviewPage />} />
           <Route path="delay-prediction" element={<DelayPredictionPage />} />
           <Route path="anomaly-detection" element={<AnomalyDetectionPage />} />
+          <Route path="alerts" element={<AnomalyDetectionPage />} />
           <Route path="historical" element={<HistoricalAnalyticsPage />} />
           <Route path="disruption" element={<DisruptionPage />} />
           <Route path="assistant" element={<AssistantPage />} />
@@ -30,4 +34,3 @@ export function AppRouter() {
     </AnimatePresence>
   );
 }
-

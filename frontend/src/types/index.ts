@@ -29,6 +29,144 @@ export interface AircraftDetails extends Aircraft {
   flightNumber?: string;
 }
 
+// ── Comprehensive Aviation Intelligence Types ─
+
+export interface AirportInfo {
+  iata: string;
+  icao: string;
+  name: string;
+  city: string;
+  country: string;
+  coordinates?: [number, number]; // [lon, lat]; omitted when coordinates are unavailable
+  timezone: string;
+}
+
+export interface AirlineInfo {
+  name: string;
+  code: string; // IATA code
+  icao: string;
+  country: string;
+  callsign: string;
+  color: string;
+}
+
+export interface FlightTelemetry {
+  latitude: number | null;
+  longitude: number | null;
+  altitudeFt: number;
+  groundSpeedKts: number;
+  headingDeg: number;
+  verticalRateFpm: number;
+  squawk: string;
+  lastContact: number;
+}
+
+export interface FlightProgress {
+  distanceTotalKm: number;
+  distanceElapsedKm: number;
+  distanceRemainingKm: number;
+  percentage: number;
+  departureScheduled: string;
+  departureActual?: string;
+  arrivalScheduled: string;
+  arrivalEstimated: string;
+  elapsedTimeMin: number;
+  remainingTimeMin: number;
+}
+
+export type DelayCategory = 'on_time' | 'minor' | 'moderate' | 'severe';
+export type RiskLevel = 'minimal' | 'elevated' | 'high' | 'critical';
+
+export interface AnomalyIndicator {
+  id: string;
+  type:
+    | 'holding_pattern'
+    | 'altitude_deviation'
+    | 'speed_anomaly'
+    | 'squawk_emergency'
+    | 'weather_deviation'
+    | 'descent_rate_anomaly';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  title: string;
+  description: string;
+  timestamp: string;
+  score: number;
+}
+
+export interface FlightIntelligence {
+  riskScore: number; // 0 - 100
+  riskLevel: RiskLevel;
+  predictedDelayCategory: string;
+  predictedArrivalDelayMin: number;
+  confidence: number;
+  anomalies: AnomalyIndicator[];
+  intelligenceSummary: string;
+  actualObservations: string[];
+  historicalFacts: string[];
+  modelPredictions: string[];
+}
+
+export interface FlightTrack {
+  id: string;
+  dataKind?: 'historical_bts' | 'live_state_vectors' | 'demo';
+  flightNumber: string;
+  callsign: string;
+  airline: AirlineInfo;
+  aircraft: {
+    model: string;
+    icao24: string;
+    registration: string;
+    typeCode: string;
+  };
+  origin: AirportInfo;
+  destination: AirportInfo;
+  telemetry: FlightTelemetry;
+  progress: FlightProgress;
+  status: 'active' | 'scheduled' | 'holding' | 'diverted' | 'landed';
+  delayCategory: DelayCategory;
+  delayMinutes: number;
+  intelligence: FlightIntelligence;
+  routeWaypoints: [number, number][]; // Array of [lon, lat]
+  isDemo: boolean;
+}
+
+// ── Alerts Center ─────────────────────────────
+
+export interface AviationAlert {
+  id: string;
+  flightId: string;
+  flightNumber: string;
+  airline: string;
+  callsign: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  category: 'ANOMALY' | 'WEATHER' | 'AIRSPACE' | 'TELEMETRY' | 'CONGESTION';
+  title: string;
+  explanation: string;
+  detectionTime: string;
+  origin: string;
+  destination: string;
+  coordinates: [number, number] | null; // [lon, lat]; null when no validated coordinate
+  riskScore: number;
+  status: 'ACTIVE' | 'MONITORING' | 'RESOLVED';
+  isDemo: boolean;
+}
+
+// ── Tracker Filters ───────────────────────────
+
+export interface TrackerFilterState {
+  searchQuery: string;
+  selectedAirline: string;
+  selectedAirport: string;
+  delayFilter: DelayCategory | 'all';
+  riskFilter: RiskLevel | 'all';
+  statusFilter: string;
+  altitudeRange: [number, number];
+  showRoutes: boolean;
+  showLabels: boolean;
+  radarSweeps: boolean;
+  viewMode: '2d' | '3d';
+}
+
 // ── KPI Metrics ───────────────────────────────
 
 export interface KpiMetric {
@@ -160,4 +298,3 @@ export interface AsyncState<T> {
   status: LoadingState;
   error: string | null;
 }
-

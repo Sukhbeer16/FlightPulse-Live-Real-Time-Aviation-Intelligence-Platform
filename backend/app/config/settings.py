@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     data_directory: Path = Path("data")
     database_url: str | None = None
+    opensky_client_id: str | None = None
+    opensky_client_secret: str | None = None
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

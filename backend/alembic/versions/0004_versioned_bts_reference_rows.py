@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0004_versioned_bts_reference_rows"
+revision = "0004_bts_ref_versioning"
 down_revision = "0003_bts_reference_data"
 branch_labels = None
 depends_on = None
