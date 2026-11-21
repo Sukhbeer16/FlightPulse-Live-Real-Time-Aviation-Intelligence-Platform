@@ -275,13 +275,13 @@ function NavLinkItem({ item, isActive, collapsed, onClick }: NavLinkItemProps) {
         textDecoration: 'none',
         border: isActive ? '1px solid rgba(37,188,235,0.18)' : '1px solid transparent',
       }}
-      onMouseEnter={(e) => {
+      onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
         if (!isActive) {
           (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(241,245,249,0.05)';
           (e.currentTarget as HTMLAnchorElement).style.color = '#F1F5F9';
         }
       }}
-      onMouseLeave={(e) => {
+      onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
         if (!isActive) {
           (e.currentTarget as HTMLAnchorElement).style.background = 'transparent';
           (e.currentTarget as HTMLAnchorElement).style.color = '#94A3B8';

@@ -1,23 +1,22 @@
-import { ShieldAlert } from 'lucide-react';
-import { PlaceholderPage } from './PlaceholderPage';
+﻿import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { HistoricalAssessment } from '../features/intelligence/HistoricalAssessment';
+import { AlertsCenter } from '../features/alerts/AlertsCenter';
+import { fetchAlerts } from '../services/flightsService';
+import type { AviationAlert } from '../types';
 
 export function AnomalyDetectionPage() {
-  return (
-    <PlaceholderPage
-      Icon={ShieldAlert}
-      title="Anomaly Detection"
-      description="Isolation Forest–based aircraft anomaly detection identifying unusual altitude, speed, trajectory, squawk codes and signal patterns in real-time tracking data."
-      status="Isolation Forest Under Development"
-      features={[
-        'Isolation Forest model integration',
-        'Real-time anomaly scoring',
-        'Anomaly type classification (altitude, speed, trajectory, squawk)',
-        'Severity tier display (low / medium / high / critical)',
-        'Geographic anomaly map overlay',
-        'Historical anomaly timeline',
-        'Alert configuration panel',
-      ]}
-    />
-  );
+  const [alerts, setAlerts] = useState<AviationAlert[]>([]);
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    fetchAlerts().then(setAlerts).catch(e => setError(e.message));
+  }, []);
+  return <main>
+    {pathname !== '/alerts' && <HistoricalAssessment />}
+    {error && <p role="alert">{error}</p>}
+    <AlertsCenter alerts={alerts} flights={[]} onLocateOnMap={() => navigate('/live-tracking')} />
+  </main>;
 }
-
+export default AnomalyDetectionPage;

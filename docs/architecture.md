@@ -28,17 +28,20 @@ React + TypeScript UI <------ FastAPI backend API <----------+
 ```
 
 The diagram shows logical responsibilities, not a requirement to deploy all
-components at once. The initial implementation contains a FastAPI health
-endpoint and a UI health check. The package directories establish boundaries
-for future code; they do not imply that integrations or data sources are
-already implemented.
+components at once. The current API separates operational-flight discovery,
+historical BTS records and compact historical aggregate files. OpenSky state
+vectors remain upstream live observations. Delay predictions are explicitly
+experimental; anomaly and alert endpoints report unavailable until validated
+detectors and rules exist. The package directories remain boundaries rather
+than a requirement to deploy additional services.
 
 ## Initial application
 
 - `backend/app/config/` loads and validates environment-backed settings with
   Pydantic Settings.
 - `backend/app/api/` contains HTTP routes. `/health` and
-  `/api/v1/health` report process-level status and configured service metadata.
+  `/api/v1/health` report process-level status; `/api/v1/health/database`
+  checks the configured database with a read-only statement.
 - `backend/app/main.py` builds the FastAPI app and configures local-development
   CORS origins.
 - `frontend/` is a separate Vite application and reads its backend URL from

@@ -6,7 +6,7 @@ export function AssistantPage() {
     <PlaceholderPage
       Icon={MessageSquare}
       title="Aviation Assistant"
-      description="A RAG-powered aviation intelligence assistant. Ask natural-language questions about flights, delays, routes, airlines and historical performance. Powered by vector search over BTS documentation."
+      description="A RAG-powered aviation intelligence assistant. Ask natural-language questions about flights, delays, routes, airlines and historical performance. This assistant is planned."
       status="RAG System Planned"
       features={[
         'Natural-language query interface',

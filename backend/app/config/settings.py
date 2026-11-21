@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +16,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     data_directory: Path = Path("data")
     database_url: str | None = None
+    opensky_client_id: str | None = None
+    opensky_client_secret: str | None = None
+    opensky_request_timeout: float = Field(default=10, gt=0, le=60)
+    kafka_bootstrap_servers: str = "127.0.0.1:9092"
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

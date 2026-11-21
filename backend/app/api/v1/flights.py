@@ -89,6 +89,48 @@ def list_flights(
 
 
 @router.get(
+    "/search",
+    response_model=FlightListResponse,
+    summary="Search operational flights",
+)
+def search_flights_alias(
+    page: Annotated[int, Query(ge=1, le=1_000_000)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    flight_number: Annotated[str | None, Query(min_length=1, max_length=20)] = None,
+    airline_code: Annotated[str | None, Query(min_length=1, max_length=3)] = None,
+    origin: Annotated[str | None, Query(min_length=3, max_length=4)] = None,
+    destination: Annotated[str | None, Query(min_length=3, max_length=4)] = None,
+    flight_date: Annotated[date | None, Query()] = None,
+    session: Session = Depends(get_db),
+) -> FlightListResponse:
+    from backend.app.services.flights import search_flights
+
+    flights, total = search_flights(
+        session=session,
+        page=page,
+        page_size=page_size,
+        flight_number=flight_number,
+        airline_code=airline_code,
+        origin=origin,
+        destination=destination,
+        flight_date=flight_date,
+        sort_order="asc",
+    )
+    total_pages = (total + page_size - 1) // page_size
+    return FlightListResponse(
+        data=flights,
+        pagination={
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_previous": page > 1 and total > 0,
+        },
+    )
+
+
+@router.get(
     "/{flight_id}",
     response_model=FlightDetailResponse,
     summary="Get a flight",

@@ -6,7 +6,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "0005_bts_reference_raw_values"
-down_revision = "0004_versioned_bts_reference_rows"
+down_revision = "0004_bts_ref_versioning"
 branch_labels = None
 depends_on = None
 

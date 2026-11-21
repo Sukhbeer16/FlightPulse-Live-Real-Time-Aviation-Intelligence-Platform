@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { apiFetch, API_ENDPOINTS } from '../../services/apiConfig';
 import { motion } from 'framer-motion';
 import {
   AreaChart,
@@ -158,12 +160,15 @@ export function DelayTrendChart() {
 // ── Airline Performance Chart ─────────────────
 
 export function AirlinePerformanceChart() {
-  const data = DEMO_AIRLINE_PERFORMANCE.map((a) => ({
-    name: a.code,
-    'On-Time %': a.onTimeRate,
-    'Avg Delay': a.avgDelay,
-  }));
-
+  const [data, setData] = useState<{name:string; 'On-Time %':number | null; 'Avg Delay':number | null}[]>([]);
+  const [subtitle, setSubtitle] = useState('Loading BTS carrier report');
+  useEffect(() => {
+    apiFetch<{source_period:string; data:{Reporting_Airline:string; delay_rate:number|null; average_arrival_delay_minutes:number|null}[]}>
+      (API_ENDPOINTS.analyticsReport('airlines')).then(report => {
+        setData(report.data.map(r => ({name:r.Reporting_Airline, 'On-Time %':r.delay_rate == null ? null : 100*(1-r.delay_rate), 'Avg Delay': r.average_arrival_delay_minutes})));
+        setSubtitle('BTS eligible arrivals / ' + report.source_period);
+      }).catch(() => setSubtitle('BTS carrier report unavailable'));
+  }, []);
   return (
     <motion.div
       custom={1}
@@ -175,8 +180,7 @@ export function AirlinePerformanceChart() {
     >
       <SectionHeader
         title="Airline Performance"
-        subtitle="On-time rate and average delay by carrier"
-        isDemo={true}
+        subtitle={subtitle}
       />
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }} barGap={4}>
