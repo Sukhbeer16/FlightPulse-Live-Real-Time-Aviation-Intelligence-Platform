@@ -1,347 +1,91 @@
-// ─────────────────────────────────────────────────────────
-// FlightPulse Live — PRIMARY SCREEN: Live Flight Tracker
-// MapLibre tactical operations center with 3D Globe toggle & intelligence drawer
-// ─────────────────────────────────────────────────────────
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  Globe,
-  Map as MapIcon,
-  Play,
-  Pause,
-  FastForward,
-  Filter,
-  Search,
-  Eye,
-  EyeOff,
-  Layers,
-  Radio,
-  RefreshCw,
-  Sparkles,
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, ChevronRight, Globe, Layers, MapPin, Plane, Radar, Search } from 'lucide-react';
+import { API_BASE_URL, apiFetch } from '../services/apiConfig';
 import { MapLibreTracker } from '../features/tracker/MapLibreTracker';
-import { GlobeLazyWrapper } from '../features/globe/GlobeLazyWrapper';
-import { FlightSearchFilter } from '../features/tracker/FlightSearchFilter';
-import { FlightRosterPanel } from '../features/tracker/FlightRosterPanel';
-import { FlightDetailDrawer } from '../features/flights/FlightDetailDrawer';
-import {
-  fetchFlights,
-  fetchHistoricalFlights,
-  fetchLiveFlights,
-  mapLiveStatesToFlightTracks,
-  stepAviationSimulation,
-  setSimulationSpeed,
-  getSimulationSpeed,
-  filterFlights,
-  isUsingLiveBackend,
-  setUseLiveBackend,
-} from '../services/flightsService';
-import type { FlightTrack, TrackerFilterState } from '../types';
+import { measure, regions, utc, type Region, type Snapshot } from '../features/tracker/airspace';
 
-export const LiveTrackingPage: React.FC = () => {
-  const [flights, setFlights] = useState<FlightTrack[]>([]);
-  const [selectedFlight, setSelectedFlight] = useState<FlightTrack | null>(null);
-  const [isRosterOpen, setIsRosterOpen] = useState(true);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
-  const [simSpeed, setSimSpeed] = useState<number>(1);
-  const [dataSource, setDataSource] = useState<
-    'demo' | 'historical_fastapi' | 'live_fastapi' | 'live_unavailable'
-  >('historical_fastapi');
-  const [liveUnavailable, setLiveUnavailable] = useState<string | null>(null);
-  const [sourceStamp, setSourceStamp] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  // Filter state
-  const [filters, setFilters] = useState<TrackerFilterState>({
-    searchQuery: '',
-    selectedAirline: 'all',
-    selectedAirport: 'all',
-    delayFilter: 'all',
-    riskFilter: 'all',
-    statusFilter: 'all',
-    altitudeRange: [0, 50000],
-    showRoutes: true,
-    showLabels: true,
-    radarSweeps: true,
-    viewMode: '2d',
-  });
-
+export function LiveTrackingPage() {
+  const [region, setRegion] = useState<Region>('new-york');
+  const [custom, setCustom] = useState<[number, number]>();
+  const center = custom ?? regions[region].center;
+  const [mapCenter, setMapCenter] = useState(center);
+  const moved = Math.abs(mapCenter[0] - center[0]) + Math.abs(mapCenter[1] - center[1]) > 0.3;
+  const endpoint = custom ? '/airspace?lat=' + custom[1].toFixed(2) + '&lon=' + custom[0].toFixed(2) : '/airspace/' + region;
+  const [globe, setGlobe] = useState(false);
+  const [result, setResult] = useState<Snapshot>();
+  const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  // Initial load
+  const [selectedId, select] = useState('');
+  const [query, setQuery] = useState('');
+  const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    setLiveUnavailable(null);
-    fetchHistoricalFlights({ page: 1, pageSize: 50 }).then(({ flights: data }) => {
-      if (mounted) {
-        setFlights(data);
-        setDataSource('historical_fastapi');
-        setLoading(false);
-        setSelectedFlight(data[0] ?? null);
-      }
-    }).catch((error) => {
-      if (mounted) {
-        setLiveUnavailable(error instanceof Error ? error.message : "Historical request failed");
-        setLoading(false);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [attempt]);
-
-  // Periodic simulation tick loop (smooth aircraft progression)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (dataSource === 'demo') {
-        const updated = stepAviationSimulation(2);
-        setFlights([...updated]);
-
-        // Keep selected flight in sync with updated telemetry
-        setSelectedFlight((current) => {
-          if (!current) return null;
-          const match = updated.find((f) => f.id === current.id);
-          return match || current;
-        });
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [dataSource]);
-
-  useEffect(() => {
-    if (dataSource !== 'live_fastapi') return;
-    let active = true;
-    const timer = window.setInterval(async () => {
-      const update = await fetchLiveFlights();
-      if (!active) return;
-      if (update.unavailable) {
-        setFlights([]);
-        setSelectedFlight(null);
-        setLiveUnavailable(update.unavailable);
-        setDataSource('live_unavailable');
-        return;
-      }
-      setSourceStamp(new Date(update.sourceTime*1000).toISOString() + (update.cached ? ' (cached)' : ' (fresh response)'));
-      const next = mapLiveStatesToFlightTracks(update.states, update.sourceTime);
-      setFlights(next);
-      setSelectedFlight(current => next.find(item => item.id === current?.id) ?? null);
-    }, 120000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [dataSource]);
-
-  // Handle simulation speed toggles
-  const handleSpeedChange = (speed: number) => {
-    setSimSpeed(speed);
-    setSimulationSpeed(speed);
-  };
-
-  // Filter flights
-  const filteredFlights = useMemo(() => {
-    return filterFlights(flights, filters);
-  }, [flights, filters]);
-
-  const handleUpdateFilter = (updates: Partial<TrackerFilterState>) => {
-    setFilters((prev) => ({ ...prev, ...updates }));
-  };
-
-  // Toggle backend live vs demo
-  const handleToggleBackend = async () => {
-    setLoading(true);
-    if (dataSource === 'live_fastapi' || dataSource === 'live_unavailable') {
+    const controller = new AbortController();
+    let timer: number;
+    async function refresh() {
       try {
-        const historical = await fetchHistoricalFlights({ page: 1, pageSize: 50 });
-        setFlights(historical.flights);
-        setDataSource('historical_fastapi');
-        setLiveUnavailable(null);
-        setSelectedFlight(historical.flights[0] ?? null);
-      } catch (error) {
-        setDataSource('historical_fastapi');
-        setFlights([]);
-        setSelectedFlight(null);
-        setLiveUnavailable(error instanceof Error ? error.message : 'Historical API unavailable.');
+        const snapshot = await apiFetch<Snapshot>(API_BASE_URL + '/api/v1/live' + endpoint, {signal: controller.signal});
+        if (controller.signal.aborted) return;
+        setResult(snapshot);
+        setError(false);
+      } catch {
+        if (!controller.signal.aborted) setError(true);
       }
-      setLoading(false);
-      return;
+      if (!controller.signal.aborted) timer = window.setTimeout(refresh, 30000);
     }
-    const live = await fetchLiveFlights();
-    if (live.unavailable) {
-      setFlights([]);
-      setSelectedFlight(null);
-      setDataSource('live_unavailable');
-      setLiveUnavailable(live.unavailable);
-    } else {
-      setSourceStamp(new Date(live.sourceTime*1000).toISOString() + (live.cached ? ' (cached)' : ' (fresh response)'));
-      setFlights(mapLiveStatesToFlightTracks(live.states, live.sourceTime));
-      setDataSource('live_fastapi');
-      setLiveUnavailable(null);
-      setSelectedFlight(null);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-[#060A13]">
-      {/* Primary Map or 3D Globe */}
-      <div className="absolute inset-0">
-        {viewMode === '2d' ? (
-          <MapLibreTracker
-            flights={filteredFlights}
-            selectedFlight={selectedFlight}
-            onSelectFlight={(flight) => setSelectedFlight(flight)}
-            showRoutes={filters.showRoutes}
-            showLabels={filters.showLabels}
-            radarSweeps={filters.radarSweeps}
-          />
-        ) : (
-          <GlobeLazyWrapper
-            flights={filteredFlights}
-            selectedFlight={selectedFlight}
-            onSelectFlight={(flight) => setSelectedFlight(flight)}
-          />
-        )}
+    void refresh();
+    const clock = window.setInterval(() => setNow(Date.now()), 10000);
+    return () => { controller.abort(); clearTimeout(timer); clearInterval(clock); };
+  }, [endpoint, attempt]);
+  const flights = useMemo(() => {
+    const term = query.trim().toUpperCase();
+    return (result?.aircraft ?? []).filter(a => [a.callsign,a.registration,a.id].some(v => v?.toUpperCase().includes(term)))
+      .sort((a,b) => a.callsign.localeCompare(b.callsign));
+  }, [result, query]);
+  const selected = flights.find(a => a.id === selectedId);
+  const delayed = result && now - result.time > 120000;
+  const status = error ? (result ? 'Refresh interrupted' : 'Feed unavailable') : !result ? 'Connecting' : delayed ? 'Delayed feed' : 'Live feed';
+  function changeRegion(next: Region, point?: [number, number]) {
+    setRegion(next); setCustom(point); setResult(undefined); select(''); setQuery(''); setError(false);
+  }
+  return <section className="radar-workspace">
+    <div className="radar-stage">
+      <MapLibreTracker aircraft={flights} selected={selected} center={center} globe={globe} onSelect={select} onMove={setMapCenter} />
+      <div className="radar-tools">
+        <label className="region-picker"><MapPin size={17}/><select aria-label="Tracking region" value={custom ? 'custom' : region} onChange={e => changeRegion(e.target.value as Region)}>{custom && <option value="custom">Map area</option>}{Object.entries(regions).map(([key,r]) => <option key={key} value={key}>{r.name}</option>)}</select></label>
+        <div className="mode-picker" aria-label="Map projection">
+          <button aria-pressed={!globe} onClick={() => setGlobe(false)}><Layers size={16}/>2D</button>
+          <button aria-pressed={globe} onClick={() => setGlobe(true)}><Globe size={16}/>3D</button>
+        </div>
       </div>
-
-      {dataSource === 'live_fastapi' && <p className="absolute bottom-12 left-3 z-20 bg-slate-950/90 p-2 text-xs text-cyan-300">OpenSky ? {sourceStamp} ? {flights.length} aircraft with positions</p>}
-      {(liveUnavailable || loading) && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-3 py-2 rounded-lg border border-slate-800 bg-slate-950/90 text-xs font-mono text-slate-300">
-          {loading
-            ? 'LOADING BACKEND DATA…'
-            : `REQUEST FAILED — ${liveUnavailable}`}
-          {!loading && dataSource === 'historical_fastapi' && <button className="ml-2 underline" onClick={() => setAttempt(value => value + 1)}>Retry historical data</button>}
-        </div>
-      )}
-
-      {/* Floating Tactical Operations Bar (Top Center) */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/85 border border-slate-800/90 shadow-2xl backdrop-blur-xl text-xs font-mono">
-        {/* 2D vs 3D View Switcher */}
-        <div className="flex items-center bg-slate-900/80 rounded-lg p-0.5 border border-slate-800/60">
-          <button
-            onClick={() => setViewMode('2d')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-colors ${
-              viewMode === '2d'
-                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <MapIcon className="w-3.5 h-3.5" />
-            <span>2D RADAR</span>
-          </button>
-          <button
-            onClick={() => setViewMode('3d')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-colors ${
-              viewMode === '3d'
-                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>3D GLOBE</span>
-          </button>
-        </div>
-
-        <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
-
-        {/* Simulation Speed Controls */}
-        <div className={dataSource === 'demo' ? "hidden sm:flex items-center gap-1" : "hidden"}>
-          <button
-            onClick={() => handleSpeedChange(simSpeed === 0 ? 1 : 0)}
-            title={simSpeed === 0 ? 'Resume Simulation' : 'Pause Simulation'}
-            className={`p-1.5 rounded-lg border transition-colors ${
-              simSpeed === 0
-                ? 'bg-amber-950/70 border-amber-500/50 text-amber-300'
-                : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:text-cyan-400'
-            }`}
-          >
-            {simSpeed === 0 ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-          </button>
-
-          {[1, 2, 5].map((spd) => (
-            <button
-              key={spd}
-              onClick={() => handleSpeedChange(spd)}
-              className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors ${
-                simSpeed === spd
-                  ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300'
-                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {spd}x
-            </button>
-          ))}
-        </div>
-
-        <div className="h-4 w-px bg-slate-800 mx-1 hidden md:block" />
-
-        {/* Search & Filter Drawer Toggle */}
-        <button
-          onClick={() => setIsFilterOpen((prev) => !prev)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
-            isFilterOpen || filters.searchQuery || filters.selectedAirline !== 'all'
-              ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300'
-              : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:text-slate-100'
-          }`}
-        >
-          <Search className="w-3.5 h-3.5" />
-          <span>SEARCH &amp; FILTER</span>
-        </button>
-
-        {/* Mode Tag (DEMO vs LIVE FASTAPI) */}
-        <button
-          disabled={loading} onClick={handleToggleBackend}
-          title="Toggle between historical replay and live OpenSky"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-[10px] text-slate-300 transition-colors"
-        >
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              dataSource === 'live_fastapi'
-                ? 'bg-emerald-400'
-                : dataSource === 'live_unavailable'
-                ? 'bg-red-400'
-                : 'bg-amber-400 animate-pulse'
-            }`}
-          />
-          <span>
-            {dataSource === 'live_fastapi'
-              ? 'LIVE OPENSKY'
-              : dataSource === 'live_unavailable'
-              ? 'LIVE UNAVAILABLE'
-              : dataSource === 'historical_fastapi'
-              ? 'HISTORICAL FASTAPI'
-              : 'DEMO SIMULATION'}
-          </span>
-        </button>
-      </div>
-
-      {/* Collapsible Search & Filter Dropdown overlay */}
-      {isFilterOpen && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 w-[92%] sm:w-[540px]">
-          <FlightSearchFilter
-            filterState={filters}
-            onChangeFilter={handleUpdateFilter}
-            totalFlightsCount={flights.length}
-            filteredCount={filteredFlights.length}
-          />
-        </div>
-      )}
-
-      {/* Tactical Flight Roster Side Panel (Left) */}
-      <FlightRosterPanel
-        flights={filteredFlights}
-        selectedFlight={selectedFlight}
-        onSelectFlight={(flight) => {
-          setSelectedFlight(flight);
-        }}
-        isOpen={isRosterOpen}
-        onToggleOpen={() => setIsRosterOpen((prev) => !prev)}
-      />
-
-      {/* Selected Flight Intelligence Drawer (Right) */}
-      <FlightDetailDrawer
-        flight={selectedFlight}
-        onClose={() => setSelectedFlight(null)}
-      />
+      {moved && <button className="search-area" onClick={() => changeRegion(region, mapCenter)}>Search this area</button>}
+      <div className="map-legend"><i/> Aircraft {selected && <><i className="focused"/> Selected</>}</div>
     </div>
-  );
-};
+    <aside className="traffic-panel" aria-label="Aircraft data">
+      <div className="traffic-intro"><div className="traffic-kicker"><Radar size={17}/> REGIONAL RADAR</div>
+        <h1>{custom ? 'Map area' : regions[region].name + ' airspace'}</h1>
+        <div className="traffic-meta"><span className={'feed-state ' + (status === 'Live feed' ? 'connected' : '')}>{status}</span><span>80 NM radius</span></div>
+      </div>
+      {selected ? <div className="detail-body">
+        <button className="back-link" onClick={() => select('')}><ArrowLeft size={15}/> Aircraft list</button>
+        <div className="aircraft-title"><Plane/><h2>{selected.callsign}</h2></div>
+        <p>{[selected.type, selected.registration].filter(Boolean).join(' · ') || selected.id.toUpperCase()}</p>
+        <div className="metric-grid">{[
+          ['Altitude', measure(selected.altitude,'ft')], ['Ground speed', measure(selected.speed,'kt')],
+          ['Track', measure(selected.heading,'°')], ['Vertical rate', measure(selected.verticalRate,'ft/min')],
+        ].map(([label,v]) => <div key={label}><small>{label}</small><strong>{v}</strong></div>)}</div>
+        <dl>{[['ICAO address',selected.id.toUpperCase()],['Squawk',selected.squawk || '—'],['Latitude',selected.lat.toFixed(4)+'°'],['Longitude',selected.lon.toFixed(4)+'°'],['Position time',utc(selected.observed)]].map(([k,v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+      </div> : <>
+        <div className="list-head"><h2>Aircraft <span>{flights.length}</span></h2>
+          <label className="traffic-search"><Search size={17}/><input aria-label="Search aircraft" placeholder="Callsign, registration or ICAO" value={query} onChange={e => setQuery(e.target.value)}/></label>
+        </div>
+        <div className="traffic-list">
+          {flights.map(a => <button key={a.id} onClick={() => select(a.id)}><span className="plane-tile"><Plane size={18}/></span>
+            <span className="aircraft-ident"><strong>{a.callsign}</strong><small>{a.registration || a.id.toUpperCase()}{a.type && ' · ' + a.type}</small></span>
+            <span className="roster-values"><b>{a.ground ? 'Ground' : measure(a.altitude,'ft')}</b><small>{measure(a.speed,'kt')}</small></span><ChevronRight size={15}/></button>)}
+          {!flights.length && <p className="empty-airspace">{error && !result ? 'The aircraft feed is unavailable. Retrying automatically.' : !result ? 'Receiving aircraft positions…' : query ? 'No aircraft match your search.' : 'No recent positions reported in this region.'}</p>}
+        </div>
+      </>}
+      <footer><a href="https://www.adsb.lol/" target="_blank" rel="noreferrer">ADS-B · adsb.lol</a><span>{result ? utc(result.time) : 'Awaiting report'}</span>{error && <button onClick={() => setAttempt(a => a+1)}>Retry</button>}</footer>
+    </aside>
+  </section>;
+}

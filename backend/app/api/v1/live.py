@@ -8,9 +8,23 @@ from fastapi import APIRouter, HTTPException, Query, status
 from backend.app.schemas.live import FlightIdentityMatchResponse, LiveFlightStatesResponse
 from backend.app.services.opensky import OpenSkyUnavailable, get_live_states, cached_response, provider_status
 from backend.app.services.flight_identity import match_historical_callsign
+from backend.app.services.airspace import get_airspace, REGIONS
 
 
 router = APIRouter(prefix="/live", tags=["live tracking"])
+
+
+@router.get("/airspace/{region}")
+def regional_airspace(region: Literal["new-york", "london", "delhi", "amsterdam"]):
+    return airspace_at(*REGIONS[region])
+
+
+@router.get("/airspace")
+def airspace_at(lat: Annotated[float, Query(ge=-90, le=90)], lon: Annotated[float, Query(ge=-180, le=180)]):
+    try:
+        return get_airspace(lat, lon)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="ADS-B feed temporarily unavailable.") from None
 
 
 def _live_states(

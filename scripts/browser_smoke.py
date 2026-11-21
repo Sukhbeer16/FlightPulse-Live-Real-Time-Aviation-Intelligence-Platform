@@ -32,30 +32,22 @@ def run():
         expect(page.locator("tbody tr").first).to_contain_text("JFK")
         page.get_by_role("button", name="Next", exact=True).click()
         expect(page.get_by_text("Page 2", exact=True)).to_be_visible()
-        pattern = "**/historical/processed-flights?*"
+        pattern = "**/live/airspace/new-york"
         page.route(pattern, lambda route: route.abort())
         visit("live-tracking")
-        expect(page.get_by_role("button", name="Retry historical data")).to_be_visible()
+        expect(page.get_by_text("Feed unavailable", exact=True)).to_be_visible()
         page.unroute(pattern)
-        page.get_by_role("button", name="Retry historical data").click()
-        expect(
-            page.get_by_role("heading", name="Historical BTS record")
-        ).to_be_visible()
-        page.get_by_title("Close Drawer").click()
-        page.get_by_role("button", name="3D GLOBE").click()
-        expect(page.get_by_text("3D ORBITAL VIEW")).to_be_visible()
-        page.locator("canvas").first.wait_for()
-        page.get_by_role("button", name="2D RADAR").click()
-        page.locator(".maplibregl-canvas").wait_for()
-        page.get_by_title("Toggle between historical replay and live OpenSky").click()
-        expect(page.get_by_text("LOADING BACKEND DATA", exact=False)).to_have_count(
-            0, timeout=20000
-        )
-        provider = page.request.get(
-            "http://127.0.0.1:8000/api/v1/live/provider-status"
-        ).json()
-        if not provider["oauth_configured"]:
-            expect(page.get_by_text("credentials_missing", exact=False)).to_be_visible()
+        page.get_by_role("button", name="Retry", exact=True).click()
+        aircraft = page.locator(".traffic-list button")
+        expect(aircraft.first).to_be_visible()
+        aircraft.first.click()
+        expect(page.get_by_text("Position time", exact=True)).to_be_visible()
+        for mode in ["3D", "2D"]:
+            toggle = page.get_by_role("button", name=mode, exact=True)
+            toggle.click()
+            expect(toggle).to_have_attribute("aria-pressed", "true")
+            expect(page.locator(".maplibregl-canvas")).to_be_visible()
+            expect(page.locator(".aircraft-title")).to_be_visible()
         visit("delay-prediction")
         for model in [
             "logistic-regression",
