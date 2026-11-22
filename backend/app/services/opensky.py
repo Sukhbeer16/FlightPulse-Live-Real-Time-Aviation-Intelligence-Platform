@@ -6,6 +6,7 @@ import json
 import time
 import re
 from collections import OrderedDict
+from contextvars import ContextVar
 from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -25,6 +26,10 @@ MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 STATE_CACHE_TTL_SECONDS = 10
 MAX_CACHED_REGIONS = 8
 MAX_CACHED_STATE_VECTORS = 2_000
+cached_response = ContextVar("opensky_cached_response", default=False)
+provider_status = {"state": "never_requested", "last_success": None}
+_request_lock = Lock()
+_retry_deadline = 0.0
 _token_lock = Lock()
 _cached_token: str | None = None
 _token_expires_at = 0.0
@@ -48,8 +53,10 @@ class OpenSkyUnavailable(RuntimeError):
 
 def clear_state_cache() -> None:
     """Clear cached state vectors, primarily for deterministic tests."""
-    with _state_cache_lock:
+    global _retry_deadline
+    with _request_lock, _state_cache_lock:
         _state_cache.clear()
+        _retry_deadline = 0.0
 
 
 def parse_callsign_flight_identity(
@@ -64,9 +71,9 @@ def parse_callsign_flight_identity(
     return match.group(1), match.group(2)
 
 
-def _read_json(request: Request, *, timeout: int = REQUEST_TIMEOUT_SECONDS) -> dict:
+def _read_json(request: Request, *, timeout: float | None = None) -> dict:
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout or get_settings().opensky_request_timeout) as response:
             payload = response.read(MAX_RESPONSE_BYTES + 1)
     except HTTPError as error:
         retry_after = error.headers.get("X-Rate-Limit-Retry-After-Seconds")
@@ -93,10 +100,8 @@ def _access_token() -> str | None:
     settings = get_settings()
     client_id = settings.opensky_client_id
     client_secret = settings.opensky_client_secret
-    if not client_id and not client_secret:
-        return None
     if not client_id or not client_secret:
-        raise OpenSkyUnavailable()
+        raise OpenSkyUnavailable(status_code=412)
     with _token_lock:
         if _cached_token and time.monotonic() < _token_expires_at:
             return _cached_token
@@ -118,7 +123,7 @@ def _access_token() -> str | None:
         if not isinstance(token, str) or not token:
             raise OpenSkyUnavailable()
         try:
-            expires_in = max(60, int(payload.get("expires_in", 1800)))
+            expires_in = max(0, int(payload.get("expires_in", 1800)))
         except (TypeError, ValueError):
             expires_in = 1800
         _cached_token = token
@@ -130,6 +135,25 @@ def get_live_states(
     *, lamin: float, lomin: float, lamax: float, lomax: float
 ) -> tuple[int, list[LiveStateVector]]:
     """Fetch current state vectors for one bounded region; never infer schedules."""
+    global _retry_deadline
+    cached_response.set(False)
+    with _request_lock:
+        if time.monotonic() < _retry_deadline:
+            raise OpenSkyUnavailable(status_code=429, retry_after=str(int(_retry_deadline-time.monotonic())+1))
+        try:
+            result = _fetch_region(lamin, lomin, lamax, lomax)
+        except OpenSkyUnavailable as error:
+            provider_status["state"] = {412:"credentials_missing",400:"authentication_failed",401:"authentication_failed",
+                                        403:"access_denied",429:"rate_limited"}.get(error.status_code,"unavailable")
+            if error.status_code == 429:
+                seconds = error.retry_after or "60"
+                _retry_deadline = time.monotonic() + (int(seconds) if seconds.isdigit() else 60)
+            raise
+        provider_status.update(state="connected", last_success=result[0])
+        return result
+
+
+def _fetch_region(lamin, lomin, lamax, lomax):
     cache_key = (lamin, lomin, lamax, lomax)
     now = time.monotonic()
     with _state_cache_lock:
@@ -137,6 +161,7 @@ def get_live_states(
         if cached is not None:
             expires_at, source_time, cached_states = cached
             if now < expires_at:
+                cached_response.set(True)
                 _state_cache.move_to_end(cache_key)
                 return source_time, [
                     state.model_copy(deep=True) for state in cached_states

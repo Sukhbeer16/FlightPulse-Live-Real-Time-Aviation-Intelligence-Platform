@@ -1,20 +1,16 @@
-import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
-import { Sidebar } from '../components/Sidebar/Sidebar';
+import { useEffect, useRef } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Topbar } from '../components/Topbar/Topbar';
+import { AlertNotifications } from '../features/alerts/AlertNotifications';
+import '../styles/tracker.css';
 
 export function AppLayout() {
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#080D18' }}>
-      <Sidebar mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
-      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        <Topbar onToggleMobile={() => setMobileOpen((prev) => !prev)} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden">
-          <Outlet />
-        </main>
-      </div>
-    </div>
-  );
+  const { pathname } = useLocation();
+  const main = useRef<HTMLElement>(null);
+  useEffect(() => {
+    main.current?.scrollTo(0, 0);
+    const title = main.current?.querySelector('h1')?.textContent?.trim();
+    document.title = title ? title + ' · FlightPulse' : 'FlightPulse · Flight radar';
+  }, [pathname]);
+  return <div className="fp-shell"><AlertNotifications/><Topbar /><main ref={main}><Outlet /></main></div>;
 }

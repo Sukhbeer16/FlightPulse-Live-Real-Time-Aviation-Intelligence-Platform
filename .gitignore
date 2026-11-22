@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 .Python
 .venv/
+.venv_broken_backup/
 venv/
 env/
 ENV/

@@ -57,7 +57,7 @@ export function LiveMap({ aircraft }: LiveMapProps) {
         },
         center: [-40, 35],
         zoom: 2.5,
-        attributionControl: false,
+        attributionControl: { compact: false },
       });
 
       map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');

@@ -1,0 +1,2 @@
+.fp-shell {height:100dvh;display:flex;flex-direction:column;background:#101a28}
+.fp-shell>main {min-height:0;flex:1;overflow:auto}

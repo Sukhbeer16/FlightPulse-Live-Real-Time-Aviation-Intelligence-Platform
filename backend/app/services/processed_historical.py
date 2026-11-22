@@ -1,354 +1,179 @@
-"""Bounded, read-only record search over the existing February BTS Parquet."""
+"""Paged, read-only queries over the January and February BTS Parquet sources."""
 
-from __future__ import annotations
-
-from datetime import date, datetime
-from math import isfinite
+from datetime import date
 from pathlib import Path
-from typing import Any
-import sqlite3
-import tempfile
+
+import duckdb
+import pyarrow.parquet as parquet
 
 from backend.app.config.settings import get_settings
 from backend.app.schemas.historical import ProcessedParquetFlightRead
 
-
 SOURCE_FILE = "bts_ontime_2024_02.parquet"
-SOURCE_PERIOD = "2024-02"
-BATCH_SIZE = 4_096
-MAX_SOURCE_BYTES = 512 * 1024 * 1024
-MAX_SOURCE_ROWS = 5_000_000
-REQUIRED_COLUMNS = {"FlightDate", "Reporting_Airline", "Origin", "Dest"}
-OPTIONAL_COLUMNS = (
-    "Flight_Number_Reporting_Airline",
-    "CRSDepTime",
-    "DepTime",
-    "CRSArrTime",
-    "ArrTime",
-    "DepDelay",
-    "ArrDelay",
-    "Cancelled",
-    "Diverted",
-    "CancellationCode",
-)
+SOURCE_PERIOD = "2024-01 to 2024-02"
+COLUMNS = {
+    "DOT_ID_Reporting_Airline": ("reporting_airline_id", "VARCHAR"),
+    "OriginAirportSeqID": ("origin_airport_seq_id", "VARCHAR"),
+    "DestAirportSeqID": ("destination_airport_seq_id", "VARCHAR"),
+    "CarrierDelay": ("carrier_delay_minutes", "DOUBLE"),
+    "WeatherDelay": ("weather_delay_minutes", "DOUBLE"),
+    "NASDelay": ("airspace_delay_minutes", "DOUBLE"),
+    "SecurityDelay": ("security_delay_minutes", "DOUBLE"),
+    "LateAircraftDelay": ("late_aircraft_delay_minutes", "DOUBLE"),
+    "FlightDate": ("flight_date", "DATE"),
+    "Reporting_Airline": ("reporting_airline", "VARCHAR"),
+    "Origin": ("origin_bts_code", "VARCHAR"),
+    "Dest": ("destination_bts_code", "VARCHAR"),
+    "Flight_Number_Reporting_Airline": ("flight_number", "VARCHAR"),
+    "CRSDepTime": ("scheduled_departure_local_hhmm", "INTEGER"),
+    "DepTime": ("actual_departure_local_hhmm", "INTEGER"),
+    "CRSArrTime": ("scheduled_arrival_local_hhmm", "INTEGER"),
+    "ArrTime": ("actual_arrival_local_hhmm", "INTEGER"),
+    "DepDelay": ("departure_delay_minutes", "DOUBLE"),
+    "ArrDelay": ("arrival_delay_minutes", "DOUBLE"),
+    "Cancelled": ("cancelled", "INTEGER"),
+    "Diverted": ("diverted", "INTEGER"),
+    "CancellationCode": ("cancellation_code", "VARCHAR"),
+    "Distance": ("distance_miles", "DOUBLE"),
+    "CRSElapsedTime": ("scheduled_elapsed_time_minutes", "DOUBLE"),
+}
 
 
 class HistoricalParquetUnavailable(RuntimeError):
-    """The bounded historical source file is missing or incompatible."""
+    pass
 
 
-def _as_date(value: Any) -> date:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            pass
-    raise HistoricalParquetUnavailable("A source flight date is invalid.")
-
-
-def _as_string(value: Any) -> str | None:
-    return None if value is None else str(value)
-
-
-def _as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        result = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return result if isfinite(result) else None
-
-
-def _as_int(value: Any) -> int | None:
-    number = _as_float(value)
-    return int(number) if number is not None and number.is_integer() else None
-
-
-def _matches(
-    row: dict[str, Any],
-    *,
-    flight_number: str | None,
-    airline_code: str | None,
-    origin: str | None,
-    destination: str | None,
-    flight_date: date | None,
-    cancelled: bool | None,
-    diverted: bool | None,
-    delayed: bool | None,
-    flight_identifier: str | None = None,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    departure_delay_min: float | None = None,
-    departure_delay_max: float | None = None,
-    arrival_delay_min: float | None = None,
-    arrival_delay_max: float | None = None,
-) -> bool:
-    def code_matches(field: str, query: str | None) -> bool:
-        return query is None or (
-            row.get(field) is not None
-            and str(row[field]).strip().upper() == query.strip().upper()
-        )
-
-    if not code_matches("Reporting_Airline", airline_code):
-        return False
-    if not code_matches("Origin", origin) or not code_matches("Dest", destination):
-        return False
-    source_flight_number = row.get("Flight_Number_Reporting_Airline")
-    if flight_identifier is not None:
-        identifier = str(source_flight_number).strip() if source_flight_number is not None else ""
-        if identifier != flight_identifier.strip():
-            return False
-    if flight_number is not None and (
-        source_flight_number is None or str(source_flight_number) != flight_number
-    ):
-        return False
-    row_date = _as_date(row.get("FlightDate"))
-    if flight_date is not None and row_date != flight_date:
-        return False
-    if date_from is not None and row_date < date_from:
-        return False
-    if date_to is not None and row_date > date_to:
-        return False
-    row_cancelled = _as_int(row.get("Cancelled"))
-    row_diverted = _as_int(row.get("Diverted"))
-    if cancelled is not None and row_cancelled != int(cancelled):
-        return False
-    if diverted is not None and row_diverted != int(diverted):
-        return False
-    if delayed is not None:
-        arrival_delay = _as_float(row.get("ArrDelay"))
-        if arrival_delay is None or (arrival_delay > 15) != delayed:
-            return False
-    departure_delay = _as_float(row.get("DepDelay"))
-    arrival_delay = _as_float(row.get("ArrDelay"))
-    if departure_delay_min is not None and (
-        departure_delay is None or departure_delay < departure_delay_min
-    ):
-        return False
-    if departure_delay_max is not None and (
-        departure_delay is None or departure_delay > departure_delay_max
-    ):
-        return False
-    if arrival_delay_min is not None and (
-        arrival_delay is None or arrival_delay < arrival_delay_min
-    ):
-        return False
-    if arrival_delay_max is not None and (
-        arrival_delay is None or arrival_delay > arrival_delay_max
-    ):
-        return False
-    return True
+def source_query(path):
+    with parquet.ParquetFile(path) as file:
+        if path.stat().st_size > 512 * 1024**2 or file.metadata.num_rows > 5_000_000:
+            raise HistoricalParquetUnavailable(
+                "Parquet source exceeds local query limits"
+            )
+        names = set(file.schema.names)
+    if not {"FlightDate", "Reporting_Airline", "Origin", "Dest"} <= names:
+        raise HistoricalParquetUnavailable("Missing required BTS columns")
+    fields = [
+        f"CAST({name if name in names else 'NULL'} AS {kind}) AS {alias}"
+        for name, (alias, kind) in COLUMNS.items()
+    ]
+    return (
+        "SELECT ? AS source_file, file_row_number + 1 AS source_row_number, "
+        + ", ".join(fields)
+        + " FROM read_parquet(?, file_row_number=true)"
+    )
 
 
 def search_processed_flights(
     *,
-    page: int,
-    page_size: int,
-    flight_number: str | None = None,
-    airline_code: str | None = None,
-    origin: str | None = None,
-    destination: str | None = None,
+    page,
+    page_size,
+    flight_number=None,
+    airline_code=None,
+    origin=None,
+    destination=None,
+    airport=None,
     flight_date: date | None = None,
-    cancelled: bool | None = None,
-    diverted: bool | None = None,
-    delayed: bool | None = None,
-    flight_identifier: str | None = None,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    departure_delay_min: float | None = None,
-    departure_delay_max: float | None = None,
-    arrival_delay_min: float | None = None,
-    arrival_delay_max: float | None = None,
-    sort_by: str = "source_row",
-    sort_order: str = "asc",
-) -> tuple[list[ProcessedParquetFlightRead], int]:
-    """Scan in fixed-size projected Arrow batches; retain only the requested page."""
-    path = get_settings().data_directory / "processed" / "monthly" / SOURCE_FILE
+    cancelled=None,
+    diverted=None,
+    delayed=None,
+    flight_identifier=None,
+    date_from=None,
+    date_to=None,
+    departure_delay_min=None,
+    departure_delay_max=None,
+    arrival_delay_min=None,
+    arrival_delay_max=None,
+    sort_by="source_row",
+    sort_order="asc",
+    source_file=None,
+    source_row_number=None,
+):
+    root = get_settings().data_directory / "processed"
+    paths = [
+        p
+        for p in (root / "monthly" / SOURCE_FILE, root / "bts_ontime_2024_01.parquet")
+        if p.is_file()
+    ]
+    if not paths:
+        raise HistoricalParquetUnavailable("No monthly BTS source is available")
     try:
-        if not path.is_file() or path.stat().st_size > MAX_SOURCE_BYTES:
-            raise HistoricalParquetUnavailable(
-                "The processed historical source is unavailable."
-            )
-        import pyarrow.parquet as parquet
-
-        parquet_file = parquet.ParquetFile(path)
-        if parquet_file.metadata.num_rows > MAX_SOURCE_ROWS:
-            raise HistoricalParquetUnavailable(
-                "The processed source exceeds the configured row limit."
-            )
-        if REQUIRED_COLUMNS - set(parquet_file.schema.names):
-            raise HistoricalParquetUnavailable(
-                "The processed source schema is missing required flight fields."
-            )
-        columns = [
-            "FlightDate",
-            "Reporting_Airline",
-            "Origin",
-            "Dest",
-            *[name for name in OPTIONAL_COLUMNS if name in parquet_file.schema.names],
-        ]
-        start = (page - 1) * page_size
-        stop = start + page_size
-        total = 0
-        selected: list[ProcessedParquetFlightRead] = []
-        source_row_number = 0
-        requires_sort = sort_by != "source_row" or sort_order == "desc"
-        temp_database: sqlite3.Connection | None = None
-        temp_path: str | None = None
-        if requires_sort:
-            temp_file = tempfile.NamedTemporaryFile(
-                prefix="flightpulse-historical-sort-", suffix=".sqlite", delete=False
-            )
-            temp_path = temp_file.name
-            temp_file.close()
-            temp_database = sqlite3.connect(temp_path)
-            temp_database.execute(
-                """
-                CREATE TABLE matches (
-                    source_row INTEGER PRIMARY KEY,
-                    flight_date TEXT,
-                    flight_number TEXT,
-                    reporting_airline TEXT,
-                    origin TEXT,
-                    destination TEXT,
-                    scheduled_dep INTEGER,
-                    actual_dep INTEGER,
-                    scheduled_arr INTEGER,
-                    actual_arr INTEGER,
-                    dep_delay REAL,
-                    arr_delay REAL,
-                    cancelled INTEGER,
-                    diverted INTEGER,
-                    cancellation_code TEXT
-                )
-                """
-            )
-        for batch in parquet_file.iter_batches(
-            batch_size=BATCH_SIZE, columns=columns
+        union = " UNION ALL ".join(source_query(path) for path in paths)
+        params = [value for path in paths for value in (path.name, str(path))]
+        filters = []
+        if airport is not None:
+            filters.append("(upper(origin_bts_code)=upper(?) OR upper(destination_bts_code)=upper(?))")
+            params.extend((airport, airport))
+        for expression, value in (
+            ("source_file = ?", source_file),
+            ("source_row_number = ?", source_row_number),
+            ("flight_number = ?", flight_number),
+            ("flight_number = ?", flight_identifier),
+            ("upper(reporting_airline) = upper(?)", airline_code),
+            ("upper(origin_bts_code) = upper(?)", origin),
+            ("upper(destination_bts_code) = upper(?)", destination),
+            ("flight_date = ?", flight_date),
+            ("flight_date >= ?", date_from),
+            ("flight_date <= ?", date_to),
+            ("cancelled = ?", cancelled),
+            ("diverted = ?", diverted),
+            ("(arrival_delay_minutes > 15) = ?", delayed),
+            ("departure_delay_minutes >= ?", departure_delay_min),
+            ("departure_delay_minutes <= ?", departure_delay_max),
+            ("arrival_delay_minutes >= ?", arrival_delay_min),
+            ("arrival_delay_minutes <= ?", arrival_delay_max),
         ):
-            values = batch.to_pydict()
-            for offset in range(batch.num_rows):
-                source_row_number += 1
-                row = {name: values[name][offset] for name in columns}
-                _as_date(row["FlightDate"])
-                if not _matches(
-                    row,
-                    flight_number=flight_number,
-                    airline_code=airline_code,
-                    origin=origin,
-                    destination=destination,
-                    flight_date=flight_date,
-                    cancelled=cancelled,
-                    diverted=diverted,
-                    delayed=delayed,
-                    flight_identifier=flight_identifier,
-                    date_from=date_from,
-                    date_to=date_to,
-                    departure_delay_min=departure_delay_min,
-                    departure_delay_max=departure_delay_max,
-                    arrival_delay_min=arrival_delay_min,
-                    arrival_delay_max=arrival_delay_max,
-                ):
-                    continue
-                flight_read = ProcessedParquetFlightRead(
-                    source_file=SOURCE_FILE,
-                    source_row_number=source_row_number,
-                    flight_date=_as_date(row["FlightDate"]),
-                    reporting_airline=_as_string(
-                        row.get("Reporting_Airline")
-                    ),
-                    flight_number=_as_string(
-                        row.get("Flight_Number_Reporting_Airline")
-                    ),
-                    origin_bts_code=_as_string(row.get("Origin")),
-                    destination_bts_code=_as_string(row.get("Dest")),
-                    scheduled_departure_local_hhmm=_as_int(
-                        row.get("CRSDepTime")
-                    ),
-                    actual_departure_local_hhmm=_as_int(row.get("DepTime")),
-                    scheduled_arrival_local_hhmm=_as_int(
-                        row.get("CRSArrTime")
-                    ),
-                    actual_arrival_local_hhmm=_as_int(row.get("ArrTime")),
-                    departure_delay_minutes=_as_float(row.get("DepDelay")),
-                    arrival_delay_minutes=_as_float(row.get("ArrDelay")),
-                    cancelled=_as_int(row.get("Cancelled")),
-                    diverted=_as_int(row.get("Diverted")),
-                    cancellation_code=_as_string(row.get("CancellationCode")),
-                )
-                if temp_database is not None:
-                    temp_database.execute(
-                        "INSERT INTO matches VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            source_row_number,
-                            flight_read.flight_date.isoformat(),
-                            flight_read.flight_number,
-                            flight_read.reporting_airline,
-                            flight_read.origin_bts_code,
-                            flight_read.destination_bts_code,
-                            flight_read.scheduled_departure_local_hhmm,
-                            flight_read.actual_departure_local_hhmm,
-                            flight_read.scheduled_arrival_local_hhmm,
-                            flight_read.actual_arrival_local_hhmm,
-                            flight_read.departure_delay_minutes,
-                            flight_read.arrival_delay_minutes,
-                            flight_read.cancelled,
-                            flight_read.diverted,
-                            flight_read.cancellation_code,
-                        ),
-                    )
-                elif start <= total < stop:
-                    selected.append(
-                        flight_read
-                    )
-                total += 1
-        if temp_database is not None:
-            temp_database.commit()
-            total = int(temp_database.execute("SELECT count(*) FROM matches").fetchone()[0])
-            column = {
-                "source_row": "source_row",
-                "flight_date": "flight_date",
-                "flight_number": "flight_number",
-                "departure_delay": "dep_delay",
-                "arrival_delay": "arr_delay",
-            }[sort_by]
-            direction = "DESC" if sort_order == "desc" else "ASC"
-            rows = temp_database.execute(
-                f"SELECT * FROM matches ORDER BY {column} {direction}, source_row ASC LIMIT ? OFFSET ?",
-                (page_size, start),
-            ).fetchall()
-            temp_database.close()
-            Path(temp_path).unlink(missing_ok=True)
-            selected = [
-                ProcessedParquetFlightRead(
-                    source_file=SOURCE_FILE,
-                    source_row_number=int(row[0]),
-                    flight_date=_as_date(row[1]),
-                    reporting_airline=row[3],
-                    flight_number=row[2],
-                    origin_bts_code=row[4],
-                    destination_bts_code=row[5],
-                    scheduled_departure_local_hhmm=row[6],
-                    actual_departure_local_hhmm=row[7],
-                    scheduled_arrival_local_hhmm=row[8],
-                    actual_arrival_local_hhmm=row[9],
-                    departure_delay_minutes=row[10],
-                    arrival_delay_minutes=row[11],
-                    cancelled=row[12],
-                    diverted=row[13],
-                    cancellation_code=row[14],
-                )
-                for row in rows
-            ]
-        return selected, total
-    except HistoricalParquetUnavailable:
-        raise
-    except Exception as error:
+            if value is not None:
+                filters.append(expression)
+                params.append(value.strip() if isinstance(value, str) else value)
+        query = f" FROM ({union}) AS flights"
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        column = {
+            "source_row": "source_file DESC, source_row_number",
+            "flight_date": "flight_date",
+            "flight_number": "flight_number",
+            "departure_delay": "departure_delay_minutes",
+            "arrival_delay": "arrival_delay_minutes",
+        }[sort_by]
+        direction = {"asc": "ASC", "desc": "DESC"}[sort_order]
+        with duckdb.connect(config={"threads": 2, "memory_limit": "256MB"}) as db:
+            total = db.execute("SELECT count(*)" + query, params).fetchone()[0]
+            cursor = db.execute(
+                "SELECT *"
+                + query
+                + f" ORDER BY {column} {direction}, source_file, source_row_number LIMIT ? OFFSET ?",
+                [*params, page_size, (page - 1) * page_size],
+            )
+            fields = [column[0] for column in cursor.description]
+            return [
+                enrich_record(ProcessedParquetFlightRead(**dict(zip(fields, row))))
+                for row in cursor.fetchall()
+            ], total
+    except (duckdb.Error, OSError, ValueError) as exc:
         raise HistoricalParquetUnavailable(
-            "The processed historical source could not be read."
-        ) from error
+            "Historical source could not be queried"
+        ) from exc
+
+
+def enrich_record(row):
+    from backend.app.services.dataset_reference import references
+    airports, airlines = references()
+    row.airline_name = airlines.get(row.reporting_airline_id)
+    for side in ("origin", "destination"):
+        airport = airports.get(getattr(row, side + "_airport_seq_id"))
+        if airport:
+            setattr(row, side + "_name", airport["name"])
+            setattr(row, side + "_city", airport["city"])
+            setattr(row, side + "_coordinates", airport["coordinates"])
+    row.delay_reasons = [
+        {"label": label, "minutes": getattr(row, key), "source": "BTS reported cause"}
+        for key, label in (
+            ("carrier_delay_minutes", "Carrier operations"),
+            ("weather_delay_minutes", "Weather"),
+            ("airspace_delay_minutes", "National airspace system"),
+            ("security_delay_minutes", "Security"),
+            ("late_aircraft_delay_minutes", "Late arriving aircraft"),
+        ) if getattr(row, key) is not None and getattr(row, key) > 0
+    ]
+    row.delay_reasons.sort(key=lambda reason: reason["minutes"], reverse=True)
+    return row

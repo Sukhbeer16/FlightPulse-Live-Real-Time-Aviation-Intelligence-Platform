@@ -38,6 +38,42 @@ def test_all_saved_supervised_models_return_predictions() -> None:
         assert body["status"] == "available"
         assert body["model_id"].startswith("phase4.2")
         assert 0 <= body["model_score"] <= 1
+        if model_name != "logistic-regression":
+            assert body["evaluation_metrics"] == {}
+
+
+def test_delay_prediction_declines_dates_outside_evaluated_period() -> None:
+    request = valid_request()
+    request["flight_date"] = "2026-11-22"
+    response = client.post("/api/v1/predictions/delay", json=request)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert "January-February 2024" in body["reason"]
+
+
+def test_delay_prediction_declines_unseen_airport() -> None:
+    request = valid_request()
+    request["origin"] = "ZZZ"
+    response = client.post("/api/v1/predictions/delay", json=request)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert "origin airport" in body["reason"]
+
+
+def test_delay_prediction_reports_imputed_inputs_and_test_quality() -> None:
+    request = valid_request()
+    request["flight_date"] = "2024-02-21"
+    request["distance_miles"] = None
+    response = client.post("/api/v1/predictions/delay", json=request)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "available"
+    assert body["input_gaps"] == ["route distance"]
+    assert "route distance" in " ".join(body["limitations"])
+    assert 0 < body["evaluation_metrics"]["precision"] < 1
+    assert 0 < body["evaluation_metrics"]["recall"] < 1
 
 
 def test_isolation_forest_anomaly_response_is_statistical_only() -> None:

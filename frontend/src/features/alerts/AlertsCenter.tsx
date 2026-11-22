@@ -188,7 +188,7 @@ export const AlertsCenter: React.FC<AlertsCenterProps> = ({
                         <span>
                           ALT:{' '}
                           <strong className="text-slate-200">
-                            FL{Math.round(associatedFlight.telemetry.altitudeFt / 100)}
+                            {associatedFlight.telemetry.altitudeFt != null ? `FL${Math.round(associatedFlight.telemetry.altitudeFt / 100)}` : 'N/A'}
                           </strong>
                         </span>
                         <span>

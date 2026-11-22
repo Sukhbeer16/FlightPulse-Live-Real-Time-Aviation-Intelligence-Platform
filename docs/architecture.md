@@ -28,12 +28,10 @@ React + TypeScript UI <------ FastAPI backend API <----------+
 ```
 
 The diagram shows logical responsibilities, not a requirement to deploy all
-components at once. The current API separates operational-flight discovery,
-historical BTS records and compact historical aggregate files. OpenSky state
-vectors remain upstream live observations. Delay predictions are explicitly
-experimental; anomaly and alert endpoints report unavailable until validated
-detectors and rules exist. The package directories remain boundaries rather
-than a requirement to deploy additional services.
+components at once. The initial implementation contains a FastAPI health
+endpoint and a UI health check. The package directories establish boundaries
+for future code; they do not imply that integrations or data sources are
+already implemented.
 
 ## Initial application
 
@@ -62,8 +60,8 @@ claim that a database, data provider, or other dependency is available.
 4. Persist derived data in PostgreSQL when the first queryable application
    data use case is defined; evaluate PostGIS only for required spatial
    queries.
-5. Add Kafka and a streaming consumer only when continuous ingestion and
-   replay/backpressure requirements justify their operational cost.
+5. Run the implemented Kafka producer and one consumer when continuous
+   ingestion and replay are needed. Keep Kafka optional for ordinary API use.
 6. Add Hadoop/Hive only for a demonstrated historical-data workload that
    cannot be served effectively by the simpler local and PostgreSQL path.
 7. Version training data and model artifacts outside Git; define model

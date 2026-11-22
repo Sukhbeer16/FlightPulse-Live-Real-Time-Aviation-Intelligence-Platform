@@ -1,16 +1,36 @@
 """Live OpenSky state-vector and identity-matching routes."""
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.app.schemas.live import FlightIdentityMatchResponse, LiveFlightStatesResponse
-from backend.app.services.opensky import OpenSkyUnavailable, get_live_states
+from backend.app.services.opensky import OpenSkyUnavailable, get_live_states, cached_response, provider_status
 from backend.app.services.flight_identity import match_historical_callsign
+from backend.app.services.airspace import get_airspace, REGIONS
 
 
 router = APIRouter(prefix="/live", tags=["live tracking"])
+
+
+@router.get("/stream-states")
+def stream_states():
+    from backend.app.streaming.store import latest_states
+    return latest_states()
+
+
+@router.get("/airspace/{region}")
+def regional_airspace(region: Literal["new-york", "london", "delhi", "amsterdam"]):
+    return airspace_at(*REGIONS[region])
+
+
+@router.get("/airspace")
+def airspace_at(lat: Annotated[float, Query(ge=-90, le=90)], lon: Annotated[float, Query(ge=-180, le=180)]):
+    try:
+        return get_airspace(lat, lon)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="ADS-B feed temporarily unavailable.") from None
 
 
 def _live_states(
@@ -31,10 +51,11 @@ def _live_states(
         headers = {"Retry-After": error.retry_after} if error.retry_after else None
         raise HTTPException(
             status_code=503,
-            detail="OpenSky is unavailable or rate-limited.",
+            detail=f"OpenSky request failed ({provider_status['state']}).",
             headers=headers,
         ) from None
     return LiveFlightStatesResponse(
+        cached=cached_response.get(),
         source_time=source_time,
         count=len(states),
         states=states,
@@ -85,3 +106,17 @@ def live_identity_match(
     flight_date: date,
 ) -> FlightIdentityMatchResponse:
     return FlightIdentityMatchResponse(**match_historical_callsign(callsign, flight_date))
+
+@router.get("/stream-summary")
+def stream_summary(source: Literal["opensky", "adsb_lol", "SIMULATION"] = "opensky"):
+    """Latest aircraft-level five-minute event-time windows, separated by source."""
+    from backend.app.streaming.store import summary
+    return summary(source)
+
+
+
+@router.get("/provider-status")
+def live_provider_status():
+    from backend.app.config.settings import get_settings
+    settings = get_settings()
+    return {**provider_status, "oauth_configured": bool(settings.opensky_client_id and settings.opensky_client_secret)}

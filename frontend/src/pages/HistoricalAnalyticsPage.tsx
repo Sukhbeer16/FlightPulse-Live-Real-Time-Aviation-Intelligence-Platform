@@ -1,93 +1,41 @@
-// ─────────────────────────────────────────────────────────
-// FlightPulse Live — Historical Aviation Analytics
-// BTS historical flight delay patterns, carrier comparisons & trends
-// ─────────────────────────────────────────────────────────
+import { useState } from 'react';
+import { Archive, CalendarDays, ChartColumn, ListFilter } from 'lucide-react';
+import { HistoricalSearch } from '../features/tracker/HistoricalSearch';
+import { API_ENDPOINTS } from '../services/apiConfig';
+import { reportingMonth, useReport, type OverviewReport, type Report } from '../features/intelligence/historicalReports';
+import '../styles/analytics.css';
 
-import React, { useEffect, useState } from 'react';
-import { BarChart3, Database, FileSpreadsheet, TrendingUp } from 'lucide-react';
-import {
-  DelayTrendChart,
-  AirlinePerformanceChart,
-  FlightActivityChart,
-} from '../components/Charts/Charts';
-import { API_ENDPOINTS, apiFetch } from '../services/apiConfig';
+interface Distribution {
+  delay_type: string; statistic: string; category: string; proportion: number; flight_count: number;
+}
+const buckets = [['early','Early'],['on_time','0–15 min late'],['delayed','16–60 min late'],['severe','61–180 min late'],['extreme','Over 180 min late']];
 
-export const HistoricalAnalyticsPage: React.FC = () => {
-  const [overview, setOverview] = useState<{
-    total_flights: number;
-    eligible_arrival_records: number;
-    delayed_flights: number;
-    cancelled_flights: number;
-    diverted_flights: number;
-    delay_rate: number | null;
-  } | null>(null);
-  const [status, setStatus] = useState<'loading' | 'available' | 'unavailable'>('loading');
-  useEffect(() => {
-    apiFetch<{
-      data_kind: 'historical_aggregate';
-      source_period: string;
-      statistics: typeof overview;
-    }>(API_ENDPOINTS.analyticsOverview)
-      .then((response) => {
-        setOverview(response.statistics);
-        setStatus('available');
-      })
-      .catch(() => setStatus('unavailable'));
-  }, []);
-  return (
-    <div className="relative w-full h-[calc(100vh-64px)] overflow-y-auto p-4 md:p-6 bg-[#070A12] max-w-7xl mx-auto space-y-6 text-slate-100">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-cyan-400" />
-            <h1 className="font-mono text-2xl font-black tracking-wider text-slate-100">
-              HISTORICAL BTS AVIATION ANALYTICS
-            </h1>
-          </div>
-          <p className="text-xs text-slate-400 font-sans mt-1">
-            Bureau of Transportation Statistics (BTS) baseline records, PySpark pipeline telemetry &amp; carrier rankings
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 font-mono text-xs">
-          <span className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300">
-            BTS HISTORICAL API:{' '}
-            <strong className={status === 'available' ? 'text-cyan-400' : 'text-amber-400'}>
-              {status === 'available' ? 'CONNECTED' : status === 'loading' ? 'CHECKING' : 'UNAVAILABLE'}
-            </strong>
-          </span>
-        </div>
-      </div>
-
-      {overview && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          {[
-            ['TOTAL BTS RECORDS', overview.total_flights],
-            ['ELIGIBLE ARRIVAL', overview.eligible_arrival_records],
-            ['DELAYED >15M', overview.delayed_flights],
-            ['CANCELLED', overview.cancelled_flights],
-            ['DIVERTED', overview.diverted_flights],
-          ].map(([label, value]) => (
-            <div key={String(label)} className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-              <div className="text-[10px] font-mono text-slate-500">{label}</div>
-              <div className="mt-1 text-xl font-mono font-bold text-cyan-400">
-                {Number(value).toLocaleString()}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Analytics Charts Grid */}
-      <div className="space-y-6">
-        <DelayTrendChart />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <AirlinePerformanceChart />
-          <FlightActivityChart />
-        </div>
-      </div>
-    </div>
-  );
-};
+function DelayDistribution() {
+  const [event,setEvent] = useState<'arrival'|'departure'>('arrival');
+  const report = useReport<Report<Distribution>>(API_ENDPOINTS.analyticsReport('delay-distribution'));
+  const rows = (report.data?.data ?? []).filter(r=>r.delay_type===event && r.statistic==='category');
+  return <section className="analysis-card"><div className="analysis-card-head"><div><h2>Delay distribution</h2><p>Share of eligible records in each delay interval</p></div><div className="analysis-segments">
+    {(['arrival','departure'] as const).map(m=><button key={m} aria-pressed={m===event} onClick={()=>setEvent(m)}>{m==='arrival'?'Arrivals':'Departures'}</button>)}</div></div>
+    {!rows.length ? <p className="analysis-message">{report.error?'The delay distribution is unavailable.':report.data?'No eligible records.':'Loading report…'} {report.error && <button onClick={report.retry}>Retry</button>}</p> :
+      <div className="analysis-distribution">{buckets.map(([key,label])=>{
+        const row=rows.find(r=>r.category===key);
+        if (!row) return null;
+        return <div key={key}><strong>{label}</strong><div className="carrier-track"><i style={{width:row.proportion*100+'%'}}/></div><b>{(row.proportion*100).toFixed(1)}%</b><small>{row.flight_count.toLocaleString()} flights</small></div>;
+      })}</div>}
+  </section>;
+}
+export function HistoricalAnalyticsPage() {
+  const summary=useReport<OverviewReport>(API_ENDPOINTS.analyticsOverview);
+  const s=summary.data?.statistics;
+  const [tab,setTab]=useState<'records'|'performance'>('records');
+  return <div className="analysis-page"><div className="analysis-content">
+    <header className="analysis-mast"><div><p className="analysis-overline"><Archive size={15}/> Historical data</p><h1>Flight archive</h1><p>Search reported US flights by carrier, route and operating date.</p></div><span className="analysis-period"><CalendarDays size={16}/>Summary · {reportingMonth(summary.data?.source_period)}</span></header>
+    <div className="archive-strip">{[['Records',s?.total_flights],['Eligible arrivals',s?.eligible_arrival_records],['Delayed',s?.delayed_flights],['Cancelled',s?.cancelled_flights],['Diverted',s?.diverted_flights]].map(([label,value])=><div key={label}><small>{label}</small><strong>{typeof value==='number'?value.toLocaleString():'—'}</strong></div>)}</div>
+    {summary.error && <p className="analysis-error" role="alert">Archive totals are unavailable. <button onClick={summary.retry}>Retry</button></p>}
+    <div className="archive-tabs"><button aria-pressed={tab==='records'} onClick={()=>setTab('records')}><ListFilter size={17}/> Flight records</button><button aria-pressed={tab==='performance'} onClick={()=>setTab('performance')}><ChartColumn size={17}/> Delay analysis</button></div>
+    <div hidden={tab!=='records'}><HistoricalSearch /></div>
+    {tab==='performance' && <DelayDistribution />}
+    <p className="analysis-source">Source · US Bureau of Transportation Statistics</p>
+  </div></div>;
+}
 export default HistoricalAnalyticsPage;

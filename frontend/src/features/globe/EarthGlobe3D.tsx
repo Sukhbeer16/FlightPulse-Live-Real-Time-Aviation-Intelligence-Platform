@@ -41,6 +41,9 @@ const FlightArc3D: React.FC<FlightArc3DProps> = ({ flight, isSelected, onSelect 
 
   // Compute 3D curved arc points using Quadratic Bezier Curve
   const { curvePoints, planePos, planeHeading } = useMemo(() => {
+    if (flight.dataKind === 'live_state_vectors' && flight.telemetry.latitude != null && flight.telemetry.longitude != null) {
+      return { curvePoints: [], planePos: new THREE.Vector3(...geoToCartesian(flight.telemetry.latitude, flight.telemetry.longitude, GLOBE_RADIUS * 1.01)), planeHeading: new THREE.Vector3() };
+    }
     if (!flight.origin.coordinates || !flight.destination.coordinates) {
       return { curvePoints: [], planePos: new THREE.Vector3(), planeHeading: new THREE.Vector3() };
     }
@@ -96,6 +99,7 @@ const FlightArc3D: React.FC<FlightArc3DProps> = ({ flight, isSelected, onSelect 
     return new THREE.Line(lineGeometry, mat);
   }, [arcColor, lineGeometry, isSelected, hovered]);
 
+  if (!curvePoints.length && flight.dataKind !== 'live_state_vectors') return null;
   return (
     <group>
       {/* Flight Arc Line */}
@@ -127,7 +131,7 @@ const FlightArc3D: React.FC<FlightArc3DProps> = ({ flight, isSelected, onSelect 
           <Html distanceFactor={10} position={[0, 0.06, 0]}>
             <div className="px-2 py-0.5 rounded bg-slate-950/90 border border-cyan-500/60 text-[10px] font-mono text-cyan-400 whitespace-nowrap shadow-xl pointer-events-none">
               <span className="font-bold">{flight.callsign}</span> • FL
-              {Math.round(flight.telemetry.altitudeFt / 100)}
+              {flight.telemetry.altitudeFt == null ? 'unknown' : Math.round(flight.telemetry.altitudeFt / 100)}
             </div>
           </Html>
         )}
@@ -251,8 +255,8 @@ export const EarthGlobe3D: React.FC<EarthGlobe3DProps> = ({
           <Sparkles className="w-4 h-4 text-cyan-400 animate-spin" />
           <span className="font-bold text-slate-100">3D ORBITAL VIEW</span>
           <span className="text-slate-500">|</span>
-          <span className="text-cyan-400">{flights.length}</span>
-          <span className="text-slate-400">FLIGHT ARCS</span>
+          <span className="text-cyan-400">{flights.filter(f => f.dataKind === 'live_state_vectors' || (f.origin.coordinates && f.destination.coordinates)).length}</span>
+          <span className="text-slate-400">MAPPED FLIGHTS</span>
         </div>
       </div>
 

@@ -1,15 +1,12 @@
-// ─────────────────────────────────────────────────────────
-// FlightPulse Live — Delay Prediction ML Sandbox Page
-// ─────────────────────────────────────────────────────────
-
-import React from 'react';
 import { DelayPredictionTool } from '../features/intelligence/DelayPredictionTool';
+import '../styles/operations.css';
 
-export const DelayPredictionPage: React.FC = () => {
-  return (
-    <div className="relative w-full h-[calc(100vh-64px)] overflow-y-auto p-4 md:p-6 bg-[#070A12] max-w-6xl mx-auto">
-      <DelayPredictionTool />
-    </div>
-  );
-};
+export function DelayPredictionPage() {
+  return <div className="ops-page"><div className="ops-wrap">
+    <header className="ops-heading"><h1>Delay forecast</h1>
+      <p>Explore how a scheduled flight scores against historical arrival patterns.</p>
+    </header>
+    <DelayPredictionTool />
+  </div></div>;
+}
 export default DelayPredictionPage;

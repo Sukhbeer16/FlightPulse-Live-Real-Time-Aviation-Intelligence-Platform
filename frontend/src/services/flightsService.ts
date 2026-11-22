@@ -109,7 +109,7 @@ export function stepAviationSimulation(deltaSeconds: number = 2): FlightTrack[] 
     const heading = Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
 
     // Micro speed variations (+/- 2 kts)
-    const speedJitter = Math.sin(Date.now() / 10000 + flight.telemetry.altitudeFt) * 2;
+    const speedJitter = Math.sin(Date.now() / 10000 + (flight.telemetry.altitudeFt ?? 0)) * 2;
     const groundSpeed = Math.round((flight.telemetry.groundSpeedKts || 480) + speedJitter);
 
     return {
@@ -154,6 +154,14 @@ export function setUseLiveBackend(active: boolean) {
 // ── Flight Data Fetching ───────────────────────────────────
 
 export interface HistoricalFlightItem {
+  airline_name?: string | null;
+  origin_name?: string | null;
+  destination_name?: string | null;
+  origin_coordinates?: [number, number] | null;
+  destination_coordinates?: [number, number] | null;
+  delay_reasons?: {label:string; minutes:number; source:string}[];
+  distance_miles: number | null;
+  scheduled_elapsed_time_minutes: number | null;
   data_kind: 'historical_bts';
   source_file: string;
   source_row_number: number;
@@ -194,6 +202,7 @@ export async function fetchHistoricalFlights(params: {
   airlineCode?: string;
   origin?: string;
   destination?: string;
+  airport?: string;
   dateFrom?: string;
   dateTo?: string;
   cancelled?: boolean;
@@ -211,6 +220,7 @@ export async function fetchHistoricalFlights(params: {
   if (params.airlineCode) query.set('airline_code', params.airlineCode);
   if (params.origin) query.set('origin', params.origin);
   if (params.destination) query.set('destination', params.destination);
+  if (params.airport) query.set('airport', params.airport);
   if (params.dateFrom) query.set('date_from', params.dateFrom);
   if (params.dateTo) query.set('date_to', params.dateTo);
   if (params.cancelled !== undefined) query.set('cancelled', String(params.cancelled));
@@ -235,12 +245,16 @@ export async function fetchHistoricalFlights(params: {
       arrivalDelay > 15 ? 'minor' : 'on_time';
     const delayMinutes = arrivalDelay ?? 0;
     return {
-      id: `historical-${item.source_row_number}`,
+      id: `historical-${item.source_file}-${item.source_row_number}`,
       dataKind: 'historical_bts',
+      sourceDetails: [item.flight_date, item.source_file + ' / row ' + item.source_row_number,
+        'BTS route ' + item.origin_bts_code + ' to ' + item.destination_bts_code,
+        'Observed arrival delay (minutes) ' + (item.arrival_delay_minutes ?? 'unavailable'),
+        'Cancelled ' + (item.cancelled ?? 'unknown') + ' / diverted ' + (item.diverted ?? 'unknown')],
       flightNumber,
       callsign: `${airlineCode}${flightNumber}`,
       airline: {
-        name: 'BTS reporting carrier',
+        name: item.airline_name ?? 'BTS reporting carrier',
         code: airlineCode,
         icao: airlineCode,
         country: 'US',
@@ -254,17 +268,21 @@ export async function fetchHistoricalFlights(params: {
         typeCode: 'Unknown',
       },
       origin: {
-        iata: item.origin_bts_code ?? 'UNK',
-        icao: item.origin_bts_code ?? 'UNK',
-        name: 'BTS origin code',
+        btsCode: item.origin_bts_code,
+        iata: item.origin_bts_code ?? 'Unknown',
+        icao: 'Unknown',
+        name: item.origin_name ?? 'BTS origin code',
+        coordinates: item.origin_coordinates ?? undefined,
         city: 'Not provided',
         country: 'US',
         timezone: 'Source-local',
       },
       destination: {
-        iata: item.destination_bts_code ?? 'UNK',
-        icao: item.destination_bts_code ?? 'UNK',
-        name: 'BTS destination code',
+        btsCode: item.destination_bts_code,
+        iata: item.destination_bts_code ?? 'Unknown',
+        icao: 'Unknown',
+        name: item.destination_name ?? 'BTS destination code',
+        coordinates: item.destination_coordinates ?? undefined,
         city: 'Not provided',
         country: 'US',
         timezone: 'Source-local',
@@ -272,12 +290,12 @@ export async function fetchHistoricalFlights(params: {
       telemetry: {
         longitude: null,
         latitude: null,
-        altitudeFt: 0,
-        groundSpeedKts: 0,
-        headingDeg: 0,
-        verticalRateFpm: 0,
+        altitudeFt: null,
+        groundSpeedKts: null,
+        headingDeg: null,
+        verticalRateFpm: null,
         squawk: 'Not provided',
-        lastContact: 0,
+        lastContact: null,
       },
       progress: {
         distanceTotalKm: 0,
@@ -342,6 +360,7 @@ export interface LiveStateItem {
 }
 
 export interface LiveStatesResponse {
+  cached: boolean;
   data_kind: 'live_state_vectors';
   source: 'opensky';
   source_time: number;
@@ -355,7 +374,7 @@ export async function fetchLiveFlights(bounds?: {
   lomin?: number;
   lamax?: number;
   lomax?: number;
-}): Promise<{ states: LiveStateItem[]; sourceTime: number; unavailable?: string }> {
+}): Promise<{ states: LiveStateItem[]; sourceTime: number; cached?: boolean; unavailable?: string }> {
   const query = new URLSearchParams({
     lamin: String(bounds?.lamin ?? 40),
     lomin: String(bounds?.lomin ?? -75),
@@ -366,7 +385,7 @@ export async function fetchLiveFlights(bounds?: {
     const response = await apiFetch<LiveStatesResponse>(
       `${API_ENDPOINTS.liveStates}?${query.toString()}`
     );
-    return { states: response.states, sourceTime: response.source_time };
+    return { states: response.states, sourceTime: response.source_time, cached: response.cached };
   } catch (error) {
     return {
       states: [],
@@ -392,20 +411,27 @@ export function mapLiveStatesToFlightTracks(
     .map((state): FlightTrack => {
       const callsign = state.callsign?.trim() || 'UNKNOWN';
       const altitudeFt = state.barometric_altitude_m == null
-        ? 0
+        ? null
         : Math.round(state.barometric_altitude_m * 3.28084);
       const groundSpeedKts = state.velocity_mps == null
-        ? 0
+        ? null
         : Math.round(state.velocity_mps * 1.94384);
       return {
-        id: `${state.icao24}-${state.last_contact}`,
+        id: state.icao24,
         dataKind: 'live_state_vectors',
+        sourceDetails: ['OpenSky observation ' + new Date(state.last_contact * 1000).toISOString(),
+          'ICAO24 ' + state.icao24, 'Origin country ' + state.origin_country,
+          'Coordinates ' + state.latitude + ', ' + state.longitude,
+          'Barometric altitude (m) ' + (state.barometric_altitude_m ?? 'unavailable'),
+          'Ground speed (m/s) ' + (state.velocity_mps ?? 'unavailable'),
+          'Track (degrees) ' + (state.true_track_degrees ?? 'unavailable'),
+          'Vertical rate (m/s) ' + (state.vertical_rate_mps ?? 'unavailable')],
         flightNumber: callsign,
         callsign,
         airline: {
           name: 'OpenSky observed',
-          code: callsign.slice(0, 3),
-          icao: callsign.slice(0, 3),
+          code: 'Unknown',
+          icao: 'Unknown',
           country: state.origin_country,
           callsign,
           color: '#38BDF8',
@@ -437,9 +463,9 @@ export function mapLiveStatesToFlightTracks(
           latitude: state.latitude,
           altitudeFt,
           groundSpeedKts,
-          headingDeg: state.true_track_degrees ?? 0,
+          headingDeg: state.true_track_degrees,
           verticalRateFpm: state.vertical_rate_mps == null
-            ? 0
+            ? null
             : Math.round(state.vertical_rate_mps * 196.85),
           squawk: state.squawk ?? 'Not provided',
           lastContact: state.last_contact,
@@ -485,14 +511,10 @@ export async function fetchFlights(): Promise<{
   source: 'demo' | 'historical_fastapi';
 }> {
   if (isLiveBackendActive) {
-    try {
-      return await fetchHistoricalFlights();
-    } catch (err) {
-      console.warn('Historical FastAPI unavailable:', err);
-    }
+    return fetchHistoricalFlights();
   }
 
-  // Fallback to active simulation
+  // Explicit simulation mode
   return { flights: simulatedFlights, source: 'demo' };
 }
 
@@ -509,9 +531,9 @@ export function filterFlights(
         flight.callsign.toLowerCase().includes(q) ||
         flight.airline.name.toLowerCase().includes(q) ||
         flight.airline.code.toLowerCase().includes(q) ||
-        flight.origin.iata.toLowerCase().includes(q) ||
+        (flight.origin.btsCode ?? flight.origin.iata).toLowerCase().includes(q) ||
         flight.origin.city.toLowerCase().includes(q) ||
-        flight.destination.iata.toLowerCase().includes(q) ||
+        (flight.destination.btsCode ?? flight.destination.iata).toLowerCase().includes(q) ||
         flight.destination.city.toLowerCase().includes(q);
       if (!match) return false;
     }
@@ -529,8 +551,8 @@ export function filterFlights(
     // Airport filter
     if (filters.selectedAirport && filters.selectedAirport !== 'all') {
       if (
-        flight.origin.iata !== filters.selectedAirport &&
-        flight.destination.iata !== filters.selectedAirport
+        (flight.origin.btsCode ?? flight.origin.iata) !== filters.selectedAirport &&
+        (flight.destination.btsCode ?? flight.destination.iata) !== filters.selectedAirport
       ) {
         return false;
       }
@@ -538,56 +560,86 @@ export function filterFlights(
 
     // Delay category filter
     if (filters.delayFilter && filters.delayFilter !== 'all') {
-      if (flight.delayCategory !== filters.delayFilter) return false;
+      if (flight.dataKind === 'live_state_vectors' || flight.delayCategory !== filters.delayFilter) return false;
     }
 
+    if (filters.statusFilter && filters.statusFilter !== 'all' && flight.status !== filters.statusFilter) return false;
+    if (filters.altitudeRange && (filters.altitudeRange[0] !== 0 || filters.altitudeRange[1] !== 50000)) {
+      const altitude = flight.telemetry.altitudeFt;
+      if (altitude == null || altitude < filters.altitudeRange[0] || altitude > filters.altitudeRange[1]) return false;
+    }
     // Risk level filter
     if (filters.riskFilter && filters.riskFilter !== 'all') {
-      if (flight.intelligence.riskLevel !== filters.riskFilter) return false;
+      if (!flight.isDemo || flight.intelligence.riskLevel !== filters.riskFilter) return false;
     }
 
     return true;
   });
 }
 
-export async function fetchAlerts(): Promise<AviationAlert[]> {
-  try {
+export async function fetchAlertPage(params: {page?:number;pageSize?:number;status?:string;severity?:string;type?:string;search?:string;includeDemo?:boolean} = {}): Promise<{data:AviationAlert[];total:number;totalPages:number}> {
+  const query=new URLSearchParams({page:String(params.page??1),page_size:String(params.pageSize??20),include_demo:String(params.includeDemo??false)});
+  if(params.status)query.set('status',params.status);
+  if(params.severity)query.set('severity',params.severity);
+  if(params.type)query.set('alert_type',params.type);
+  if(params.search)query.set('search',params.search);
     const response = await apiFetch<{
-      data_kind: 'demonstration_alerts';
-      data: Array<{
-        id: string;
-        alert_type: string;
-        severity: 'info' | 'warning' | 'high';
-        flight_reference: string | null;
-        timestamp: string;
-        explanation: string;
-        factors: Array<{ source: string; factor: string; contribution: number }>;
-        source: 'demonstration';
-        confidence_status: string;
-        status: 'open';
-      }>;
-    }>(API_ENDPOINTS.alerts);
-    return response.data.map((alert) => ({
-      id: alert.id,
-      flightId: alert.flight_reference ?? '',
-      flightNumber: alert.flight_reference ?? 'N/A',
-      airline: 'Demonstration',
-      callsign: alert.flight_reference ?? 'DEMO-RISK',
-      severity: alert.severity === 'high' ? 'high' : alert.severity === 'warning' ? 'medium' : 'low',
-      category: 'TELEMETRY',
-      title: 'Demonstration Risk Alert',
-      explanation: alert.explanation,
-      detectionTime: alert.timestamp,
-      origin: 'N/A',
-      destination: 'N/A',
-      coordinates: null,
-      riskScore: alert.factors.reduce((sum, factor) => sum + factor.contribution, 0),
-      status: 'MONITORING',
-      isDemo: true,
-    }));
-  } catch {
-    return [];
-  }
+    data_kind: 'operational_alerts';
+    pagination:{total:number;total_pages:number};
+    data: Array<{
+      id: string;
+      alert_type: string;
+      severity: 'info' | 'warning' | 'high';
+      flight_reference: string | null;
+      timestamp: string;
+      updated_at: string | null;
+      acknowledged_at: string | null;
+      resolved_at: string | null;
+      evidence_time: string | null;
+      explanation: string;
+      factors: Array<{ source: string; factor: string; contribution: number }>;
+      source: 'demonstration' | 'historical_bts' | 'opensky' | 'adsb_lol';
+      title: string;
+      origin: string | null;
+      destination: string | null;
+      airline: string | null;
+      delivery_status: string;
+      delivery_error: string | null;
+      confidence_status: string;
+      status: 'open' | 'acknowledged' | 'resolved';
+    }>;
+  }>(API_ENDPOINTS.alerts + '?' + query);
+  return {total:response.pagination.total,totalPages:response.pagination.total_pages,data:response.data.map((alert) => ({
+    id: alert.id,
+    alertType: alert.alert_type,
+    updatedAt: alert.updated_at,
+    acknowledgedAt: alert.acknowledged_at,
+    resolvedAt: alert.resolved_at,
+    evidenceTime: alert.evidence_time,
+    flightId: alert.flight_reference ?? '',
+    flightNumber: alert.flight_reference ?? 'N/A',
+    airline: alert.airline ?? alert.source,
+    callsign: alert.flight_reference ?? 'DEMO-RISK',
+    severity: alert.severity === 'high' ? 'high' : alert.severity === 'warning' ? 'medium' : 'low',
+    category: 'TELEMETRY',
+    title: alert.title,
+    explanation: alert.explanation + ' Evidence: ' + alert.confidence_status + '. Source: ' + alert.source + '. Type: ' + alert.alert_type,
+    detectionTime: alert.timestamp,
+    origin: alert.origin ?? 'N/A',
+    destination: alert.destination ?? 'N/A',
+    coordinates: null,
+    riskScore: alert.factors.reduce((sum, factor) => sum + factor.contribution, 0),
+    status: alert.status === 'resolved' ? 'RESOLVED' : alert.status === 'acknowledged' ? 'MONITORING' : 'ACTIVE',
+    isDemo: alert.source === 'demonstration',
+    source: alert.source,
+    deliveryStatus: alert.delivery_status,
+    deliveryError: alert.delivery_error,
+  }))};
+
+}
+
+export async function fetchAlerts(): Promise<AviationAlert[]> {
+  return (await fetchAlertPage({pageSize:100,includeDemo:true})).data;
 }
 
 export async function checkBackendHealth(): Promise<{

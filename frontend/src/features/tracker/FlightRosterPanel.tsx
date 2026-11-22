@@ -110,20 +110,20 @@ export const FlightRosterPanel: React.FC<FlightRosterPanelProps> = ({
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <RiskBadge level={flight.intelligence.riskLevel} showScore={false} />
+                          {flight.isDemo ? <RiskBadge level={flight.intelligence.riskLevel} showScore={false} /> : flight.dataKind === 'historical_bts' ? 'BTS' : 'OpenSky'}
                         </div>
                       </div>
 
                       {/* Middle Row: Route (Origin -> Destination) */}
                       <div className="flex items-center justify-between text-xs font-mono text-slate-300 pl-1.5 mb-2">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-100">{flight.origin.iata}</span>
+                          <span className="font-bold text-slate-100">{flight.origin.btsCode ?? flight.origin.iata}</span>
                           <span className="text-slate-500 text-[10px]">{flight.origin.city}</span>
                         </div>
                         <ArrowRight className="w-3.5 h-3.5 text-cyan-400/80" />
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-slate-100">
-                            {flight.destination.iata}
+                            {flight.destination.btsCode ?? flight.destination.iata}
                           </span>
                           <span className="text-slate-500 text-[10px]">
                             {flight.destination.city}
@@ -137,21 +137,21 @@ export const FlightRosterPanel: React.FC<FlightRosterPanelProps> = ({
                           <span>
                             ALT:{' '}
                             <strong className="text-slate-200">
-                              FL{Math.round(flight.telemetry.altitudeFt / 100)}
+                              {flight.telemetry.altitudeFt ?? '?'} ft
                             </strong>
                           </span>
                           <span>
                             SPD:{' '}
                             <strong className="text-slate-200">
-                              {flight.telemetry.groundSpeedKts} kt
+                              {flight.telemetry.groundSpeedKts ?? '?'} kt
                             </strong>
                           </span>
                         </div>
                         <div>
-                          <DelayBadge
+                          {flight.dataKind !== 'live_state_vectors' && <DelayBadge
                             category={flight.delayCategory}
                             minutes={flight.delayMinutes}
-                          />
+                          />}
                         </div>
                       </div>
 

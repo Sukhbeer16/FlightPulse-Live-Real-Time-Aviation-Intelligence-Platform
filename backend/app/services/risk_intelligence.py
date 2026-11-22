@@ -41,7 +41,7 @@ def score_risk(request: RiskScoringRequest) -> dict[str, object]:
             factors.append(
                 RiskFactor(
                     source="model",
-                    factor="Logistic regression arrival-delay score",
+                    factor="Validation-selected arrival-delay score",
                     contribution=round(model_points, 2),
                     evidence_status="available",
                 )

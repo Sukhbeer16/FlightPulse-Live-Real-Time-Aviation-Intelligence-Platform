@@ -32,7 +32,7 @@ export const FlightDetailDrawer: React.FC<FlightDetailDrawerProps> = ({ flight, 
   if (!flight) return null;
 
   const isCritical = flight.intelligence.riskLevel === 'critical';
-  const machNumber = (flight.telemetry.groundSpeedKts / 573.8).toFixed(2); // approximate Mach at FL360
+  const machNumber = flight.telemetry.groundSpeedKts == null ? 'unknown' : (flight.telemetry.groundSpeedKts / 573.8).toFixed(2); // approximate Mach at FL360
 
   return (
     <AnimatePresence>
@@ -80,7 +80,10 @@ export const FlightDetailDrawer: React.FC<FlightDetailDrawerProps> = ({ flight, 
           </button>
         </div>
 
-        {/* Scrollable Intelligence Body */}
+        {flight.sourceDetails ? <div className="p-4 space-y-2 text-sm">
+          <h3>{flight.dataKind === 'historical_bts' ? 'Historical BTS record' : 'Live aircraft observation'}</h3>
+          {flight.sourceDetails.map(line => <p key={line}>{line}</p>)}
+        </div> : (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Critical Emergency Banner if applicable */}
           {isCritical && (
@@ -103,7 +106,7 @@ export const FlightDetailDrawer: React.FC<FlightDetailDrawerProps> = ({ flight, 
               {/* Origin */}
               <div>
                 <span className="text-2xl font-bold font-mono tracking-tight text-slate-100">
-                  {flight.origin.iata}
+                  {flight.origin.btsCode ?? flight.origin.iata}
                 </span>
                 <p className="text-[11px] text-slate-400 truncate max-w-[120px]">
                   {flight.origin.name}
@@ -127,7 +130,7 @@ export const FlightDetailDrawer: React.FC<FlightDetailDrawerProps> = ({ flight, 
               {/* Destination */}
               <div className="text-right">
                 <span className="text-2xl font-bold font-mono tracking-tight text-slate-100">
-                  {flight.destination.iata}
+                  {flight.destination.btsCode ?? flight.destination.iata}
                 </span>
                 <p className="text-[11px] text-slate-400 truncate max-w-[120px]">
                   {flight.destination.name}
@@ -171,9 +174,9 @@ export const FlightDetailDrawer: React.FC<FlightDetailDrawerProps> = ({ flight, 
                 <span className="text-[10px] text-slate-500 block uppercase">Baro Altitude</span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span className="text-base font-bold text-slate-100">
-                    {flight.telemetry.altitudeFt.toLocaleString()}
+                    {flight.telemetry.altitudeFt?.toLocaleString() ?? 'Unknown'}
                   </span>
-                  <span className="text-[10px] text-slate-400">ft (FL{Math.round(flight.telemetry.altitudeFt / 100)})</span>
+                  <span className="text-[10px] text-slate-400">ft (FL{(flight.telemetry.altitudeFt == null ? 'unknown' : Math.round(flight.telemetry.altitudeFt / 100))})</span>
                 </div>
               </div>
 
@@ -355,6 +358,7 @@ export const FlightDetailDrawer: React.FC<FlightDetailDrawerProps> = ({ flight, 
             </div>
           </div>
         </div>
+        )}
       </motion.div>
     </AnimatePresence>
   );

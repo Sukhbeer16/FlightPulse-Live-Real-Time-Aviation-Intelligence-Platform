@@ -102,7 +102,7 @@ npm run dev
 
 Open the Vite URL printed in the terminal (normally `http://localhost:5173`).
 The frontend health check uses `VITE_API_BASE_URL` from `frontend/.env.local`
-if set, and otherwise checks `http://127.0.0.1:8000`.
+if set. By default Vite proxies same-origin API requests to FastAPI on port 8000.
 
 ## Verify
 
@@ -384,3 +384,52 @@ secrets in frontend variables because Vite exposes them to browser code.
 Do not commit credentials, `.env` files, raw or processed datasets, or trained
 model binaries. Obtain flight data only from an appropriately licensed source
 and document its provenance and permitted use before integrating it.
+
+## Operations upgrade
+
+The tracker now separates live radar, dataset routes and Kafka positions. Forecasts automatically select one of the four deployed models using validation performance. Dataset airline names, airport coordinates and reported delay causes feed the UI. Alerts persist across restarts, support acknowledgement/resolution, and offer browser notifications plus optional SMTP delivery.
+
+See [operations setup and verification](docs/operations-upgrade.md) for the credential-free public ADS-B Kafka producer, consumer commands, email configuration and current limits. Restart the backend after pulling these changes; existing processes do not automatically load new Python code.
+
+## Current repair and evidence
+
+The dataset map now pages through source-backed route aggregates covering 334
+airports, 328 named cities and 5,757 directed routes across 1,066,492
+January–February 2024 BTS records. Historical delay details show only
+positive carrier-reported cause minutes, with a dedicated explanation API.
+The alert inbox has full-store counts, server-side filters and pagination,
+and persistent acknowledgement and resolution timestamps.
+
+The delay classifier was retrained with all approved missing-value indicators
+and a validation-selected threshold. Its held-out recall improved from 0.059
+to 0.270, but precision is 0.235 and PR-AUC is 0.209; it remains experimental.
+Saved model artifacts are local ignored data and must be restored or retrained
+on a new checkout.
+
+Details: [model evaluation](docs/model-evaluation.md), [map data](docs/map-data.md),
+[delay reasons](docs/delay-reasons.md), [alerts](docs/alerts.md), and
+[Kafka setup](docs/kafka-setup.md).
+
+To run the full local stack, start these in separate PowerShell terminals:
+
+```powershell
+# Broker (set these in the topics/producer terminal too)
+$env:KAFKA_HOME="$env:TEMP/kafka_2.13-4.0.1"
+$env:JAVA_HOME="$env:TEMP/jdk-21.0.13.1+2"
+.\scripts\kafka.ps1 start
+
+# Topics and public provider producer
+.\scripts\kafka.ps1 topics
+.\.venv\Scripts\python.exe -m backend.app.streaming.producer --provider adsb-lol --interval 30
+
+# Consumer
+.\.venv\Scripts\python.exe -m backend.app.streaming.consumer
+
+# API and frontend
+.\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload
+npm.cmd --prefix frontend run dev
+```
+
+Spark can replace the lightweight consumer when configured; do not run both
+consumer paths for the same deployment. OpenSky production requires OAuth
+client credentials in the backend `.env`; the public adsb.lol path does not.

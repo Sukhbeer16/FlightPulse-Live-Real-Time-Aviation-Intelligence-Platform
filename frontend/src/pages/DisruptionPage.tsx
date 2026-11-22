@@ -1,22 +1,9 @@
-import { Zap } from 'lucide-react';
-import { PlaceholderPage } from './PlaceholderPage';
+import { HistoricalAssessment } from '../features/intelligence/HistoricalAssessment';
+import '../styles/operations.css';
 
 export function DisruptionPage() {
-  return (
-    <PlaceholderPage
-      Icon={Zap}
-      title="Disruption Intelligence"
-      description="Proactive disruption monitoring combining weather data, NOTAMs, airspace restrictions and predictive modelling to anticipate and quantify flight disruption risk."
-      status="Planned — Phase 3"
-      features={[
-        'Weather-correlated delay risk scoring',
-        'NOTAM integration and visualisation',
-        'Airspace restriction overlay',
-        'Airport congestion index',
-        'Network effect disruption propagation',
-        'Carrier disruption comparison',
-      ]}
-    />
-  );
+  return <div className="ops-page"><div className="ops-wrap">
+    <header className="ops-heading"><h1>Disruption analysis</h1><p>Inspect observed delays and model evidence for an individual flight.</p></header>
+    <HistoricalAssessment />
+  </div></div>;
 }
-

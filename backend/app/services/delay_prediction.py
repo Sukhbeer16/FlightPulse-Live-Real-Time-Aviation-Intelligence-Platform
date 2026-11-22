@@ -63,10 +63,10 @@ FEATURES = [
 ]
 LIMITATIONS = [
     "Experimental estimate only; trained on BTS January-February 2024 data.",
-    "Class-weighted model output is not calibrated; treat the score as relative, not as a literal probability.",
-    "The held-out test recall was 0.0590 at threshold 0.5; this is not operationally validated.",
+    "Calibration is limited to January-February 2024; treat the score as an experimental estimate.",
+    "These historical models are not operationally validated and can miss delays.",
     "The model estimates arrival delay greater than 15 minutes and does not use live flight state.",
-    "Feature contributions are additive logit associations from this linear model, not causal explanations.",
+    "Feature sensitivities and any linear logit contributions are model associations, not causal explanations.",
 ]
 
 
@@ -94,15 +94,23 @@ def _load_model(model_name: str = "logistic-regression") -> tuple[Any, dict[str,
             )
         if manifest.get("features", {}).get("allowlist") != FEATURES:
             raise PredictionUnavailable("The saved model contract is incompatible.")
+        if model_name == "xgboost":
+            from importlib.metadata import version
+            if version("xgboost") != manifest["software_versions"].get("xgboost"):
+                raise PredictionUnavailable("Installed XGBoost does not match the model artifact version.")
         import joblib
 
         model = joblib.load(model_path)
+        if model_name == "random-forest":
+            model.steps[-1][1].set_params(n_jobs=1)
     except PredictionUnavailable:
         raise
     except Exception as error:
         raise PredictionUnavailable("The saved delay model could not be loaded.") from error
     if not callable(getattr(model, "predict_proba", None)):
         raise PredictionUnavailable("The saved delay model lacks probability output.")
+    if list(getattr(model, "feature_names_in_", [])) != FEATURES:
+        raise PredictionUnavailable("The model artifact's feature order is incompatible.")
     return model, manifest
 
 
@@ -162,7 +170,10 @@ def _top_feature_contributions(model: Any, frame: Any) -> list[dict[str, float |
         classifier = model.steps[-1][1]
         classes = list(model.classes_)
         positive_index = classes.index(1)
-        coefficients = classifier.coef_[positive_index]
+        # Binary sklearn classifiers store a single row for classes_[1].
+        coefficients = classifier.coef_[0]
+        if positive_index == 0:
+            coefficients = -coefficients
         names = feature_pipeline.get_feature_names_out()
         transformed = feature_pipeline.transform(frame)
         values = transformed.toarray()[0] if hasattr(transformed, "toarray") else transformed[0]
@@ -186,10 +197,41 @@ def _top_feature_contributions(model: Any, frame: Any) -> list[dict[str, float |
 
 def predict_delay(
     request: DelayPredictionRequest,
-    model_name: str = "logistic-regression",
+    model_name: str = "best",
 ) -> dict[str, Any]:
     """Return an explicitly experimental score from the saved BTS baseline."""
+    selection = None
+    if model_name == "best":
+        model_name, selection = select_best_model()
     model, manifest = _load_model(model_name)
+    coverage = manifest.get("dataset", {}).get("date_coverage", [])
+    flight_day = request.flight_date.isoformat()
+    if len(coverage) != 2 or not coverage[0] <= flight_day <= coverage[1]:
+        raise PredictionUnavailable(
+            "This model was evaluated only for January-February 2024 flights. "
+            "No dependable score is available for the requested date."
+        )
+    try:
+        encoder = model.named_steps["preprocessor"].named_transformers_["categorical"]
+        categories = encoder.categories_
+        for value, known, label in zip(
+            (request.reporting_airline.strip().upper(), request.origin.strip().upper(), request.destination.strip().upper()),
+            categories, ("carrier", "origin airport", "destination airport"),
+        ):
+            if value not in known:
+                raise PredictionUnavailable(
+                    f"The {label} was not represented in training; a supported score is unavailable."
+                )
+    except PredictionUnavailable:
+        raise
+    except (AttributeError, KeyError, TypeError) as error:
+        raise PredictionUnavailable("The model's training categories are unavailable.") from error
+    input_gaps = [label for label, value in (
+        ("scheduled departure", request.scheduled_departure_hhmm),
+        ("scheduled arrival", request.scheduled_arrival_hhmm),
+        ("scheduled elapsed time", request.scheduled_elapsed_time_minutes),
+        ("route distance", request.distance_miles),
+    ) if value is None]
     try:
         import pandas as pd
 
@@ -198,21 +240,45 @@ def predict_delay(
         classes = list(model.classes_)
         positive_index = classes.index(1)
         probability = float(probabilities[positive_index])
+        if not math.isfinite(probability) or not 0 <= probability <= 1:
+            raise PredictionUnavailable("The model returned an invalid score.")
         contributions = _top_feature_contributions(model, frame)
     except PredictionUnavailable:
         raise
     except Exception as error:
         raise PredictionUnavailable("The model could not score this request.") from error
     candidate = MODEL_CANDIDATES[model_name]
+    if model_name == "logistic-regression":
+        selected = manifest.get("model_selection", {}).get("selected_candidate", "")
+        if selected.startswith("logistic_regression_"):
+            candidate = selected
     validation_metrics = manifest.get("validation_metrics", {})
     candidate_metrics = validation_metrics.get(candidate, {})
     threshold = float(candidate_metrics.get("threshold", 0.5))
+    limitations = list(LIMITATIONS)
+    if input_gaps:
+        limitations.append("Missing schedule fields were imputed from training medians: " + ", ".join(input_gaps) + ".")
+    if flight_day <= "2024-02-11":
+        limitations.append("This flight date is within the model's training period; this score is not a held-out evaluation.")
+    # The manifest evaluates only its selected candidate on the test split.
+    final_metrics = (
+        manifest.get("final_test_metrics", {})
+        if candidate == manifest.get("model_selection", {}).get("selected_candidate")
+        else {}
+    )
+    if final_metrics.get("recall") is not None:
+        limitations.append(
+            f"Held-out test recall was {final_metrics['recall']:.3f} and precision was "
+            f"{final_metrics['precision']:.3f} at threshold {final_metrics['threshold']:.3f}; "
+            "a low score cannot rule out a delay."
+        )
     return {
         "status": "available",
-        "model_id": MODEL_SPECS[model_name]["model_id"],
+        "model_id": ("phase4.2-retrained-logistic-regression-unweighted"
+                     if candidate == "logistic_regression_unweighted" else MODEL_SPECS[model_name]["model_id"]),
         "target": "arrival delay greater than 15 minutes",
         "model_score": probability,
-        "score_interpretation": "Uncalibrated relative model score on a 0-to-1 scale.",
+        "score_interpretation": "Experimental model score on a 0-to-1 scale; calibration is limited.",
         "threshold": threshold,
         "predicted_class": "delayed" if probability >= threshold else "not_delayed",
         "explanation": (
@@ -221,6 +287,75 @@ def predict_delay(
             "associations, not causes."
         ),
         "feature_contributions": contributions,
-        "limitations": LIMITATIONS,
+        "input_gaps": input_gaps,
+        "evaluation_metrics": {key: final_metrics[key] for key in
+                               ("precision", "recall", "f1", "f2", "pr_auc", "roc_auc")
+                               if key in final_metrics},
+        "selection": selection,
+        "risk_factors": _risk_factors(model, frame, manifest, probability),
+        "limitations": limitations,
         "reason": None,
     }
+
+
+def select_best_model() -> tuple[str, dict[str, Any]]:
+    """Rank the four deployed artifacts on held-out validation, never on this flight's score."""
+    directory = get_settings().data_directory / MODEL_DIRECTORY
+    try:
+        report = json.loads((directory / "validation_metrics.json").read_text(encoding="utf-8"))
+        metrics = report["candidates"]
+        ranked = []
+        for name, default_candidate in MODEL_CANDIDATES.items():
+            candidate = (report.get("logistic_weighting_candidate_selected_for_artifact", default_candidate)
+                         if name == "logistic-regression" else default_candidate)
+            values = metrics[candidate]
+            rank = tuple(float(values[key]) for key in ("f2", "pr_auc", "recall", "precision"))
+            if not all(math.isfinite(value) and 0 <= value <= 1 for value in rank):
+                raise ValueError("Invalid validation metrics")
+            ranked.append((rank, name))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise PredictionUnavailable("The four-model validation report is missing or invalid.") from error
+    unavailable = []
+    for rank, name in sorted(ranked, reverse=True):
+        try:
+            _load_model(name)
+        except PredictionUnavailable:
+            unavailable.append(name)
+            continue
+        return name, {
+            "algorithm": name.replace("-", " ").title(),
+            "compared_models": len(ranked),
+            "metric": "validation F2",
+            "metric_value": rank[0],
+            "reason": "Highest validation F2; ties use PR-AUC, recall, then precision. Selection favors detecting delays, with a penalty for false alarms.",
+            "unavailable_models": unavailable,
+        }
+    raise PredictionUnavailable("None of the four validated delay models can be loaded.")
+
+
+def _risk_factors(model, frame, manifest, score):
+    """Local sensitivity to training-reference inputs; explicitly not causal attribution."""
+    groups = [
+        ("Operating carrier", ["Reporting_Airline"]),
+        ("Departure airport", ["Origin"]),
+        ("Arrival airport", ["Dest"]),
+        ("Departure time", ["scheduled_departure_sin", "scheduled_departure_cos"]),
+        ("Calendar", ["month", "day_of_month", "day_of_week"]),
+        ("Route distance", ["distance_miles"]),
+    ]
+    try:
+        import pandas as pd
+        medians = manifest["preprocessing"]["upstream_imputation"]["medians"]
+        reference = []
+        for _, columns in groups:
+            row = frame.iloc[0].to_dict()
+            for column in columns:
+                row[column] = "__UNKNOWN__" if column in ("Reporting_Airline", "Origin", "Dest") else medians[column]
+            reference.append(row)
+        scores = model.predict_proba(pd.DataFrame(reference, columns=FEATURES))[:, list(model.classes_).index(1)]
+        factors = [{"label": label, "score_change": round(score - float(value), 5),
+                    "description": "Compared with an unknown category or the training median; association only."}
+                   for (label, _), value in zip(groups, scores)]
+        return sorted(factors, key=lambda row: abs(row["score_change"]), reverse=True)
+    except Exception:
+        return []

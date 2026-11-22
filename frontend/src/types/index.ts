@@ -17,7 +17,7 @@ export interface Aircraft {
   verticalRate: number | null;
   squawk: string | null;
   positionSource: number;
-  lastContact: number;
+  lastContact: number | null;
   isDemo?: boolean;
 }
 
@@ -32,6 +32,7 @@ export interface AircraftDetails extends Aircraft {
 // ── Comprehensive Aviation Intelligence Types ─
 
 export interface AirportInfo {
+  btsCode?: string | null;
   iata: string;
   icao: string;
   name: string;
@@ -53,12 +54,12 @@ export interface AirlineInfo {
 export interface FlightTelemetry {
   latitude: number | null;
   longitude: number | null;
-  altitudeFt: number;
-  groundSpeedKts: number;
-  headingDeg: number;
-  verticalRateFpm: number;
+  altitudeFt: number | null;
+  groundSpeedKts: number | null;
+  headingDeg: number | null;
+  verticalRateFpm: number | null;
   squawk: string;
-  lastContact: number;
+  lastContact: number | null;
 }
 
 export interface FlightProgress {
@@ -107,6 +108,7 @@ export interface FlightIntelligence {
 }
 
 export interface FlightTrack {
+  sourceDetails?: string[];
   id: string;
   dataKind?: 'historical_bts' | 'live_state_vectors' | 'demo';
   flightNumber: string;
@@ -133,6 +135,14 @@ export interface FlightTrack {
 // ── Alerts Center ─────────────────────────────
 
 export interface AviationAlert {
+  alertType?: string;
+  updatedAt?: string | null;
+  acknowledgedAt?: string | null;
+  resolvedAt?: string | null;
+  evidenceTime?: string | null;
+  source?: string;
+  deliveryStatus?: string;
+  deliveryError?: string | null;
   id: string;
   flightId: string;
   flightNumber: string;

@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 
 from backend.app.schemas.intelligence import (
     DelayPredictionRequest,
@@ -29,6 +29,8 @@ from backend.app.services.anomaly_detection import (
 )
 from backend.app.services.risk_intelligence import score_risk
 from backend.app.services.alerts import create_demonstration_alert, list_alerts
+from backend.app.schemas.intelligence import HistoricalAlertRequest, AlertStatusRequest
+from backend.app.services.alerts import create_historical_alert, update_alert
 from backend.app.schemas.flight import PaginationMetadata
 
 
@@ -41,8 +43,8 @@ router = APIRouter(tags=["flight intelligence"])
     summary="List saved model artifacts",
     description=(
         "Report saved delay-model availability and evaluation provenance. "
-        "Only the selected logistic-regression model currently has a prediction "
-        "endpoint; no Isolation Forest artifact is available."
+        "All four saved delay models support inference. The default forecast "
+        "selects the best available model using held-out validation metrics."
     ),
 )
 def model_catalog() -> ModelCatalogResponse:
@@ -52,9 +54,9 @@ def model_catalog() -> ModelCatalogResponse:
 @router.post(
     "/intelligence/delay-predictions",
     response_model=DelayPredictionResponse,
-    summary="Estimate BTS arrival-delay probability",
+    summary="Estimate BTS arrival-delay risk with the validation winner",
     description=(
-        "Run the saved Phase 4.2 logistic model using pre-departure features. "
+        "Select among the four saved Phase 4.2 models using validation F2. "
         "This experimental January-February 2024 BTS model is not an operational "
         "delay label or a live-state estimate."
     ),
@@ -100,11 +102,12 @@ def named_delay_prediction(
 def selected_delay_prediction(
     request: DelayPredictionRequest,
     model: Literal[
+        "best",
         "logistic-regression",
         "random-forest",
         "decision-tree",
         "xgboost",
-    ] = "logistic-regression",
+    ] = "best",
 ) -> DelayPredictionResponse:
     try:
         result = predict_delay(request, model)
@@ -180,19 +183,25 @@ def evaluate_alert(request: AlertCreateRequest) -> AlertRead:
 @router.get(
     "/alerts",
     response_model=AlertListResponse,
-    summary="List in-process demonstration alerts",
+    summary="List persistent operational and historical alerts",
 )
 def alerts(
     page: Annotated[int, Query(ge=1, le=1_000_000)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     severity: Literal["info", "warning", "high"] | None = None,
-    status: Literal["open"] | None = None,
+    status: Literal["open", "acknowledged", "resolved"] | None = None,
+    alert_type: Literal["risk_assessment", "statistical_anomaly", "historical_delay", "telemetry_review"] | None = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    include_demo: bool = True,
 ) -> AlertListResponse:
     rows, total = list_alerts(
         page=page,
         page_size=page_size,
         severity=severity,
         status=status,
+        alert_type=alert_type,
+        search=search,
+        include_demo=include_demo,
     )
     total_pages = (total + page_size - 1) // page_size
     return AlertListResponse(
@@ -206,3 +215,33 @@ def alerts(
             has_previous=page > 1 and total > 0,
         ),
     )
+
+
+@router.get("/alerts/counts", summary="Full operational alert counts")
+def alert_count_summary(include_demo: bool = False):
+    from backend.app.services.alerts import alert_counts
+    return alert_counts(include_demo=include_demo)
+
+
+@router.post("/alerts/historical", response_model=AlertRead)
+def historical_alert(request: HistoricalAlertRequest):
+    from backend.app.services.processed_historical import HistoricalParquetUnavailable
+    try:
+        return create_historical_alert(request.source_file, request.source_row_number)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from None
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    except HistoricalParquetUnavailable as error:
+        raise HTTPException(503, str(error)) from None
+
+
+@router.patch("/alerts/{alert_id}", response_model=AlertRead)
+def alert_status(alert_id: str, request: AlertStatusRequest):
+    try:
+        result = update_alert(alert_id, request.status)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
+    if result is None:
+        raise HTTPException(404, "Alert not found.")
+    return result

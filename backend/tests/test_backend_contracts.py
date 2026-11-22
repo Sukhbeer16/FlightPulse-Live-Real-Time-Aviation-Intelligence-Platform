@@ -56,7 +56,7 @@ def test_anomaly_contract_and_demo_alert_listing_do_not_fabricate_data() -> None
     assert anomaly.status_code == alert_response.status_code == 200
     assert anomaly.json()["status"] == "unavailable"
     assert anomaly.json()["reason"]
-    assert alert_response.json()["data_kind"] == "demonstration_alerts"
+    assert alert_response.json()["data_kind"] == "operational_alerts"
     assert alert_response.json()["data"] == []
 
 

@@ -29,6 +29,7 @@ class LiveFlightStatesResponse(BaseModel):
     data_kind: Literal["live_state_vectors"] = "live_state_vectors"
     source: Literal["opensky"] = "opensky"
     source_time: int = Field(gt=0)
+    cached: bool = False
     count: int
     states: list[LiveStateVector]
     limitations: list[str] = Field(
