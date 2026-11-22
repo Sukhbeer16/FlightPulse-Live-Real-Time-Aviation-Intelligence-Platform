@@ -8,6 +8,8 @@ const initial = {origin:'ORD', destination:'JFK', carrier:'UA', time:'14:30', ar
 interface Prediction {
   status: string; reason?: string; model_id: string; model_score: number | null;
   threshold: number; predicted_class: string; limitations: string[];
+  input_gaps?: string[];
+  evaluation_metrics?: {precision?: number; recall?: number; pr_auc?: number};
   selection?: { algorithm:string; compared_models:number; metric:string; metric_value:number; reason:string; unavailable_models:string[] };
   risk_factors?: {label:string; score_change:number; description:string}[];
 }
@@ -72,6 +74,7 @@ export function DelayPredictionTool() {
         {dataError ? <p className="ops-error">{dataError} <button onClick={()=>retry(n=>n+1)}>Retry</button></p> : <label className="ops-record-picker">First 100 matching BTS records<select aria-label="Dataset flight" value={record?.source_file+'#'+record?.source_row_number} onChange={e=>{const r=rows.find(r=>r.source_file+'#'+r.source_row_number===e.target.value);if(r)choose(r);}}>
         {!rows.length&&<option>Loading dataset flights…</option>}{rows.map(r=><option key={r.source_file+r.source_row_number} value={r.source_file+'#'+r.source_row_number}>{r.airline_name ?? r.reporting_airline} · {r.reporting_airline}{r.flight_number} · {r.origin_bts_code}–{r.destination_bts_code} · {r.flight_date}</option>)}</select></label>}</>}
       <form className="ops-form" onSubmit={e=>{e.preventDefault();setSubmitted({...draft});setScoredRecord(mode==='dataset'?record:undefined);}}>
+        {mode==='custom' && <p className="ops-note">This research model supports January–February 2024 dates and carriers and airports seen in its training data.</p>}
         <fieldset disabled={mode==='dataset'} className="ops-fields">
           {(['origin','destination','carrier'] as const).map(key=><label key={key}>{key==='carrier'?'Reporting airline code':key==='origin'?'Departure airport':'Arrival airport'}<input required pattern={key==='carrier'?'[A-Z0-9]{1,8}':'[A-Z0-9]{3}'} maxLength={key==='carrier'?8:3} value={draft[key]} onChange={e=>update(key,e.target.value.toUpperCase())}/></label>)}
           <label>Flight date<input required type="date" value={draft.date} onChange={e=>update('date',e.target.value)}/></label>
@@ -94,11 +97,14 @@ export function DelayPredictionTool() {
           <div className="ops-score-head"><strong>{result.model_score.toFixed(3)}<small> / 1.000</small></strong></div>
           <div className="ops-meter"><span style={{width:100*result.model_score+'%'}}/><i style={{left:100*result.threshold+'%'}}/></div>
           <p className="ops-note">Relative model score · threshold {result.threshold.toFixed(2)}. This is not a calibrated probability or an estimated number of delay minutes.</p>
+          {result.input_gaps?.length ? <p className="ops-error">Estimated from training medians: {result.input_gaps.join(', ')}.</p> : null}
           {result.selection && <div className="ops-selection-note"><ShieldCheck size={20}/><span>{result.selection.algorithm} selected from {result.selection.compared_models} models<small>{result.selection.metric}: {result.selection.metric_value.toFixed(3)}.{result.selection.unavailable_models.length>0?' Some higher-ranked artifacts are unavailable.':''}</small></span></div>}
           <h3>What influenced the forecast?</h3>
           {result.risk_factors?.length ? result.risk_factors.slice(0,4).map(f=><div className="ops-cause" key={f.label}><span>{f.label}</span><b>{f.score_change>=0?'+':''}{f.score_change.toFixed(3)}</b></div>) : <p className="ops-note">Feature-level explanation unavailable for this artifact.</p>}
           <p className="ops-note">Score changes compare each input with an unknown category or training median. They are model sensitivities, not confirmed delay causes.</p>
-          <details className="ops-disclosure"><summary>Model quality and limitations</summary><p>{result.selection?.reason}</p>{result.limitations.map(l=><p key={l}>{l}</p>)}<small>{result.model_id}</small></details>
+          <details className="ops-disclosure"><summary>Model quality and limitations</summary>
+            {result.evaluation_metrics?.precision != null && result.evaluation_metrics.recall != null && <p>Held-out February 2024 test: precision {(100 * result.evaluation_metrics.precision).toFixed(1)}%, recall {(100 * result.evaluation_metrics.recall).toFixed(1)}%{result.evaluation_metrics.pr_auc != null ? `, PR-AUC ${result.evaluation_metrics.pr_auc.toFixed(3)}` : ''}. This model cannot predict every delay.</p>}
+            <p>{result.selection?.reason}</p>{result.limitations.map(l=><p key={l}>{l}</p>)}<small>{result.model_id}</small></details>
         </> : <p className="ops-notice">Select a dataset flight or enter a schedule, then run your forecast.</p>}
       </section>
       {scoredRecord && <section className="ops-card"><DelayReasons row={scoredRecord}/></section>}

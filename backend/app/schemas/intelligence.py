@@ -50,6 +50,8 @@ class DelayPredictionResponse(BaseModel):
     predicted_class: Literal["delayed", "not_delayed"] | None = None
     explanation: str | None = None
     feature_contributions: list[dict[str, float | str]] = Field(default_factory=list)
+    input_gaps: list[str] = Field(default_factory=list)
+    evaluation_metrics: dict[str, float] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
     reason: str | None = None
     selection: dict | None = None

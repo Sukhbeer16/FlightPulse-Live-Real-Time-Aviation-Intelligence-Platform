@@ -81,3 +81,22 @@ Rebuild without overwriting a working artifact:
 
 Review `validation_metrics.json` and `final_test_metrics.json` before
 promoting the new directory. The backend reads `phase4_2` by default.
+
+## Follow-up inference audit
+
+Saved research random-forest and XGBoost variants were rechecked against the
+same validation selection rule and precision floor. The best research variant,
+an unweighted random forest, reached validation F2 0.3350 versus 0.3378 for
+the deployed logistic model, so no replacement was promoted. Exploratory
+isotonic calibration reduced test Brier score from 0.12243 to 0.12157 but
+reduced test PR-AUC from 0.20854 to 0.20557. Because this comparison reused
+the existing test partition, it is not an independent basis for promotion.
+
+Inference now declines dates outside January-February 2024 and carriers or
+airports absent from the fitted training categories. Responses identify
+schedule values replaced by training medians, and display held-out test
+precision and recall only for the candidate actually evaluated on that test
+partition. Predictions for dates within the training partition are marked as
+in-sample. A later-year operational model needs later-year data and a fresh
+chronological holdout; the present schedule-only features cannot support a
+claim of perfect delay prediction.

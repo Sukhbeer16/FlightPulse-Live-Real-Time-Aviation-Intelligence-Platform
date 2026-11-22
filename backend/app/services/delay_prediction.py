@@ -204,6 +204,34 @@ def predict_delay(
     if model_name == "best":
         model_name, selection = select_best_model()
     model, manifest = _load_model(model_name)
+    coverage = manifest.get("dataset", {}).get("date_coverage", [])
+    flight_day = request.flight_date.isoformat()
+    if len(coverage) != 2 or not coverage[0] <= flight_day <= coverage[1]:
+        raise PredictionUnavailable(
+            "This model was evaluated only for January-February 2024 flights. "
+            "No dependable score is available for the requested date."
+        )
+    try:
+        encoder = model.named_steps["preprocessor"].named_transformers_["categorical"]
+        categories = encoder.categories_
+        for value, known, label in zip(
+            (request.reporting_airline.strip().upper(), request.origin.strip().upper(), request.destination.strip().upper()),
+            categories, ("carrier", "origin airport", "destination airport"),
+        ):
+            if value not in known:
+                raise PredictionUnavailable(
+                    f"The {label} was not represented in training; a supported score is unavailable."
+                )
+    except PredictionUnavailable:
+        raise
+    except (AttributeError, KeyError, TypeError) as error:
+        raise PredictionUnavailable("The model's training categories are unavailable.") from error
+    input_gaps = [label for label, value in (
+        ("scheduled departure", request.scheduled_departure_hhmm),
+        ("scheduled arrival", request.scheduled_arrival_hhmm),
+        ("scheduled elapsed time", request.scheduled_elapsed_time_minutes),
+        ("route distance", request.distance_miles),
+    ) if value is None]
     try:
         import pandas as pd
 
@@ -228,7 +256,16 @@ def predict_delay(
     candidate_metrics = validation_metrics.get(candidate, {})
     threshold = float(candidate_metrics.get("threshold", 0.5))
     limitations = list(LIMITATIONS)
-    final_metrics = manifest.get("final_test_metrics", {})
+    if input_gaps:
+        limitations.append("Missing schedule fields were imputed from training medians: " + ", ".join(input_gaps) + ".")
+    if flight_day <= "2024-02-11":
+        limitations.append("This flight date is within the model's training period; this score is not a held-out evaluation.")
+    # The manifest evaluates only its selected candidate on the test split.
+    final_metrics = (
+        manifest.get("final_test_metrics", {})
+        if candidate == manifest.get("model_selection", {}).get("selected_candidate")
+        else {}
+    )
     if final_metrics.get("recall") is not None:
         limitations.append(
             f"Held-out test recall was {final_metrics['recall']:.3f} and precision was "
@@ -250,6 +287,10 @@ def predict_delay(
             "associations, not causes."
         ),
         "feature_contributions": contributions,
+        "input_gaps": input_gaps,
+        "evaluation_metrics": {key: final_metrics[key] for key in
+                               ("precision", "recall", "f1", "f2", "pr_auc", "roc_auc")
+                               if key in final_metrics},
         "selection": selection,
         "risk_factors": _risk_factors(model, frame, manifest, probability),
         "limitations": limitations,
