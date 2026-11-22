@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.schemas.flight import PaginationMetadata
 
@@ -82,6 +82,20 @@ class ProcessedParquetFlightRead(BaseModel):
     cancelled: int | None
     diverted: int | None
     cancellation_code: str | None
+    reporting_airline_id: str | None = None
+    origin_airport_seq_id: str | None = None
+    destination_airport_seq_id: str | None = None
+    airline_name: str | None = None
+    origin_name: str | None = None
+    destination_name: str | None = None
+    origin_coordinates: tuple[float, float] | None = None
+    destination_coordinates: tuple[float, float] | None = None
+    carrier_delay_minutes: float | None = None
+    weather_delay_minutes: float | None = None
+    airspace_delay_minutes: float | None = None
+    security_delay_minutes: float | None = None
+    late_aircraft_delay_minutes: float | None = None
+    delay_reasons: list[dict] = Field(default_factory=list)
 
 
 class ProcessedParquetFlightListResponse(BaseModel):

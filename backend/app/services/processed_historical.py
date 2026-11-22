@@ -12,6 +12,14 @@ from backend.app.schemas.historical import ProcessedParquetFlightRead
 SOURCE_FILE = "bts_ontime_2024_02.parquet"
 SOURCE_PERIOD = "2024-01 to 2024-02"
 COLUMNS = {
+    "DOT_ID_Reporting_Airline": ("reporting_airline_id", "VARCHAR"),
+    "OriginAirportSeqID": ("origin_airport_seq_id", "VARCHAR"),
+    "DestAirportSeqID": ("destination_airport_seq_id", "VARCHAR"),
+    "CarrierDelay": ("carrier_delay_minutes", "DOUBLE"),
+    "WeatherDelay": ("weather_delay_minutes", "DOUBLE"),
+    "NASDelay": ("airspace_delay_minutes", "DOUBLE"),
+    "SecurityDelay": ("security_delay_minutes", "DOUBLE"),
+    "LateAircraftDelay": ("late_aircraft_delay_minutes", "DOUBLE"),
     "FlightDate": ("flight_date", "DATE"),
     "Reporting_Airline": ("reporting_airline", "VARCHAR"),
     "Origin": ("origin_bts_code", "VARCHAR"),
@@ -76,6 +84,8 @@ def search_processed_flights(
     arrival_delay_max=None,
     sort_by="source_row",
     sort_order="asc",
+    source_file=None,
+    source_row_number=None,
 ):
     root = get_settings().data_directory / "processed"
     paths = [
@@ -90,6 +100,8 @@ def search_processed_flights(
         params = [value for path in paths for value in (path.name, str(path))]
         filters = []
         for expression, value in (
+            ("source_file = ?", source_file),
+            ("source_row_number = ?", source_row_number),
             ("flight_number = ?", flight_number),
             ("flight_number = ?", flight_identifier),
             ("upper(reporting_airline) = upper(?)", airline_code),
@@ -130,10 +142,33 @@ def search_processed_flights(
             )
             fields = [column[0] for column in cursor.description]
             return [
-                ProcessedParquetFlightRead(**dict(zip(fields, row)))
+                enrich_record(ProcessedParquetFlightRead(**dict(zip(fields, row))))
                 for row in cursor.fetchall()
             ], total
     except (duckdb.Error, OSError, ValueError) as exc:
         raise HistoricalParquetUnavailable(
             "Historical source could not be queried"
         ) from exc
+
+
+def enrich_record(row):
+    from backend.app.services.dataset_reference import references
+    airports, airlines = references()
+    row.airline_name = airlines.get(row.reporting_airline_id)
+    for side in ("origin", "destination"):
+        airport = airports.get(getattr(row, side + "_airport_seq_id"))
+        if airport:
+            setattr(row, side + "_name", airport["name"])
+            setattr(row, side + "_coordinates", airport["coordinates"])
+    row.delay_reasons = [
+        {"label": label, "minutes": getattr(row, key), "source": "BTS reported cause"}
+        for key, label in (
+            ("carrier_delay_minutes", "Carrier operations"),
+            ("weather_delay_minutes", "Weather"),
+            ("airspace_delay_minutes", "National airspace system"),
+            ("security_delay_minutes", "Security"),
+            ("late_aircraft_delay_minutes", "Late arriving aircraft"),
+        ) if getattr(row, key) is not None and getattr(row, key) > 0
+    ]
+    row.delay_reasons.sort(key=lambda reason: reason["minutes"], reverse=True)
+    return row

@@ -9,7 +9,7 @@ from backend.app.schemas.live import LiveStateVector
 class Observation(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     version: Literal[1]
-    source: Literal["opensky", "SIMULATION"]
+    source: Literal["opensky", "adsb_lol", "SIMULATION"]
     source_time: int = Field(gt=0)
     state: LiveStateVector
 

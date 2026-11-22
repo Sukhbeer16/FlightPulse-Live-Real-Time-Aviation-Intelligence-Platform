@@ -135,6 +135,9 @@ export interface FlightTrack {
 // ── Alerts Center ─────────────────────────────
 
 export interface AviationAlert {
+  source?: string;
+  deliveryStatus?: string;
+  deliveryError?: string | null;
   id: string;
   flightId: string;
   flightNumber: string;

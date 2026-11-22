@@ -1,6 +1,8 @@
 ﻿# Frontend and backend integration
 
-Vite serves the React dashboard on port 5173. VITE_API_BASE_URL defaults to http://127.0.0.1:8000. The backend permits both standard localhost Vite origins. Restart Vite after changing its environment.
+Vite serves the React dashboard on port 5173 and proxies same-origin API requests to FastAPI on port 8000. In production, route `/api` to FastAPI or set `VITE_API_BASE_URL` to its public origin before building. Restart Vite after changing its environment.
+
+The radar requests an 80 nautical mile area from the backend every 30 seconds. The backend obtains aircraft observations from adsb.lol. During outages, the radar can use the last response for the same area or a dated observation file for a preset region. The interface identifies these positions as recorded snapshots.
 
 ## Tracker
 

@@ -1,5 +1,7 @@
 # Local verification and limitations
 
+> The operations upgrade supersedes the earlier audit below. See [current implementation and verification](operations-upgrade.md). The latest backend run passed 98 tests, with the PostgreSQL-dependent catalog test excluded. The public ADS-B to Kafka to consumer to API path returned 144 fresh aircraft. The current Edge smoke check passed all routes and 149 map tile requests without page errors. Older results below describe the earlier audit.
+
 ## Runtime and repository
 
 The supplied checkout was under the Vansh account. The copied .venv referenced a missing interpreter under the 6EIN account. The environment launcher was repaired with Python 3.11.15 and the existing Python 3.11 packages. The backed-up environment is already tracked by Git in this checkout. It was left intact. The audit did not create a commit or retrain a saved model.

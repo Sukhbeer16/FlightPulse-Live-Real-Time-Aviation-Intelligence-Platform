@@ -14,6 +14,12 @@ from backend.app.services.airspace import get_airspace, REGIONS
 router = APIRouter(prefix="/live", tags=["live tracking"])
 
 
+@router.get("/stream-states")
+def stream_states():
+    from backend.app.streaming.store import latest_states
+    return latest_states()
+
+
 @router.get("/airspace/{region}")
 def regional_airspace(region: Literal["new-york", "london", "delhi", "amsterdam"]):
     return airspace_at(*REGIONS[region])
@@ -102,7 +108,7 @@ def live_identity_match(
     return FlightIdentityMatchResponse(**match_historical_callsign(callsign, flight_date))
 
 @router.get("/stream-summary")
-def stream_summary(source: Literal["opensky", "SIMULATION"] = "opensky"):
+def stream_summary(source: Literal["opensky", "adsb_lol", "SIMULATION"] = "opensky"):
     """Latest aircraft-level five-minute event-time windows, separated by source."""
     from backend.app.streaming.store import summary
     return summary(source)

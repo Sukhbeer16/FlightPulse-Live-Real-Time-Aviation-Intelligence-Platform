@@ -154,6 +154,12 @@ export function setUseLiveBackend(active: boolean) {
 // ── Flight Data Fetching ───────────────────────────────────
 
 export interface HistoricalFlightItem {
+  airline_name?: string | null;
+  origin_name?: string | null;
+  destination_name?: string | null;
+  origin_coordinates?: [number, number] | null;
+  destination_coordinates?: [number, number] | null;
+  delay_reasons?: {label:string; minutes:number; source:string}[];
   distance_miles: number | null;
   scheduled_elapsed_time_minutes: number | null;
   data_kind: 'historical_bts';
@@ -246,7 +252,7 @@ export async function fetchHistoricalFlights(params: {
       flightNumber,
       callsign: `${airlineCode}${flightNumber}`,
       airline: {
-        name: 'BTS reporting carrier',
+        name: item.airline_name ?? 'BTS reporting carrier',
         code: airlineCode,
         icao: airlineCode,
         country: 'US',
@@ -261,18 +267,20 @@ export async function fetchHistoricalFlights(params: {
       },
       origin: {
         btsCode: item.origin_bts_code,
-        iata: 'Unknown',
+        iata: item.origin_bts_code ?? 'Unknown',
         icao: 'Unknown',
-        name: 'BTS origin code',
+        name: item.origin_name ?? 'BTS origin code',
+        coordinates: item.origin_coordinates ?? undefined,
         city: 'Not provided',
         country: 'US',
         timezone: 'Source-local',
       },
       destination: {
         btsCode: item.destination_bts_code,
-        iata: 'Unknown',
+        iata: item.destination_bts_code ?? 'Unknown',
         icao: 'Unknown',
-        name: 'BTS destination code',
+        name: item.destination_name ?? 'BTS destination code',
+        coordinates: item.destination_coordinates ?? undefined,
         city: 'Not provided',
         country: 'US',
         timezone: 'Source-local',
@@ -569,7 +577,7 @@ export function filterFlights(
 
 export async function fetchAlerts(): Promise<AviationAlert[]> {
     const response = await apiFetch<{
-    data_kind: 'demonstration_alerts';
+    data_kind: 'operational_alerts';
     data: Array<{
       id: string;
       alert_type: string;
@@ -578,28 +586,37 @@ export async function fetchAlerts(): Promise<AviationAlert[]> {
       timestamp: string;
       explanation: string;
       factors: Array<{ source: string; factor: string; contribution: number }>;
-      source: 'demonstration';
+      source: 'demonstration' | 'historical_bts' | 'opensky' | 'adsb_lol';
+      title: string;
+      origin: string | null;
+      destination: string | null;
+      airline: string | null;
+      delivery_status: string;
+      delivery_error: string | null;
       confidence_status: string;
-      status: 'open';
+      status: 'open' | 'acknowledged' | 'resolved';
     }>;
-  }>(API_ENDPOINTS.alerts);
+  }>(API_ENDPOINTS.alerts + '?page_size=100');
   return response.data.map((alert) => ({
     id: alert.id,
     flightId: alert.flight_reference ?? '',
     flightNumber: alert.flight_reference ?? 'N/A',
-    airline: 'Demonstration',
+    airline: alert.airline ?? alert.source,
     callsign: alert.flight_reference ?? 'DEMO-RISK',
     severity: alert.severity === 'high' ? 'high' : alert.severity === 'warning' ? 'medium' : 'low',
     category: 'TELEMETRY',
-    title: 'Demonstration Risk Alert',
+    title: alert.title,
     explanation: alert.explanation + ' Evidence: ' + alert.confidence_status + '. Source: ' + alert.source + '. Type: ' + alert.alert_type,
     detectionTime: alert.timestamp,
-    origin: 'N/A',
-    destination: 'N/A',
+    origin: alert.origin ?? 'N/A',
+    destination: alert.destination ?? 'N/A',
     coordinates: null,
     riskScore: alert.factors.reduce((sum, factor) => sum + factor.contribution, 0),
-    status: 'MONITORING',
-    isDemo: true,
+    status: alert.status === 'resolved' ? 'RESOLVED' : alert.status === 'acknowledged' ? 'MONITORING' : 'ACTIVE',
+    isDemo: alert.source === 'demonstration',
+    source: alert.source,
+    deliveryStatus: alert.delivery_status,
+    deliveryError: alert.delivery_error,
   }));
 
 }

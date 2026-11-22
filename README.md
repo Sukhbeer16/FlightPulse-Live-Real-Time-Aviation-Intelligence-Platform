@@ -102,7 +102,7 @@ npm run dev
 
 Open the Vite URL printed in the terminal (normally `http://localhost:5173`).
 The frontend health check uses `VITE_API_BASE_URL` from `frontend/.env.local`
-if set, and otherwise checks `http://127.0.0.1:8000`.
+if set. By default Vite proxies same-origin API requests to FastAPI on port 8000.
 
 ## Verify
 
@@ -384,3 +384,9 @@ secrets in frontend variables because Vite exposes them to browser code.
 Do not commit credentials, `.env` files, raw or processed datasets, or trained
 model binaries. Obtain flight data only from an appropriately licensed source
 and document its provenance and permitted use before integrating it.
+
+## Operations upgrade
+
+The tracker now separates live radar, dataset routes and Kafka positions. Forecasts automatically select one of the four deployed models using validation performance. Dataset airline names, airport coordinates and reported delay causes feed the UI. Alerts persist across restarts, support acknowledgement/resolution, and offer browser notifications plus optional SMTP delivery.
+
+See [operations setup and verification](docs/operations-upgrade.md) for the credential-free public ADS-B Kafka producer, consumer commands, email configuration and current limits. Restart the backend after pulling these changes; existing processes do not automatically load new Python code.

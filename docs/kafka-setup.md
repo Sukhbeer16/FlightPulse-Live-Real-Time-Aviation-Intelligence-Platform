@@ -13,3 +13,7 @@ Invoke-RestMethod 'http://127.0.0.1:8000/api/v1/live/stream-summary?source=SIMUL
 ~~~
 
 One invocation emits one explicitly labelled test event. Keep the broker data and Spark checkpoint together across restarts. Retention is 24 hours. A consumer outage exceeding available offsets raises a data-loss error.
+
+## Application consumer and public provider
+
+The application now supports `--provider adsb-lol` as well as OpenSky, a lightweight Kafka consumer, fresh-position API and persistent review alerts. See [operations-upgrade.md](operations-upgrade.md) for the complete commands and delivery semantics. `flight-alerts` and `flight-anomalies` remain reserved: the consumer writes its alerts to the durable application inbox, not those topics.

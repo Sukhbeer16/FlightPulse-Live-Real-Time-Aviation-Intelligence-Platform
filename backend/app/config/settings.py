@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     opensky_client_secret: str | None = None
     opensky_request_timeout: float = Field(default=10, gt=0, le=60)
     kafka_bootstrap_servers: str = "127.0.0.1:9092"
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    alert_email_to: str | None = None
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

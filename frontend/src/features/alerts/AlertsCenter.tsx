@@ -1,232 +1,58 @@
-// ─────────────────────────────────────────────────────────
-// FlightPulse Live — Aviation Alerts & Incident Center
-// Prioritized operational alerts, anomaly telemetry & rapid map triage
-// ─────────────────────────────────────────────────────────
+import { useState } from 'react';
+import { BellRing, Check, Inbox, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import type { AviationAlert } from '../../types';
+import { API_ENDPOINTS, apiFetch } from '../../services/apiConfig';
 
-import React, { useState } from 'react';
-import {
-  ShieldAlert,
-  AlertTriangle,
-  Radio,
-  Search,
-  ExternalLink,
-  MapPin,
-  Clock,
-  Filter,
-  CheckCircle2,
-  XCircle,
-} from 'lucide-react';
-import type { AviationAlert, FlightTrack } from '../../types';
-import { SeverityBadge } from '../../components/AviationBadge';
-
-interface AlertsCenterProps {
-  alerts: AviationAlert[];
-  flights: FlightTrack[];
-  onLocateOnMap: (flightId: string) => void;
+interface Props { alerts: AviationAlert[]; error: string; loading: boolean; onRefresh: () => void }
+const levels = ['critical','high','medium','low'] as const;
+export function AlertsCenter({alerts, error, loading, onRefresh}: Props) {
+  const [severity, setSeverity] = useState('all');
+  const [status, setStatus] = useState('all');
+  const [query, setQuery] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [notification, setNotification] = useState('');
+  const [notificationsOn, setNotificationsOn] = useState(()=>{try{return localStorage.getItem('flightpulse.notifications')==='on'&&'Notification' in window&&Notification.permission==='granted';}catch{return false;}});
+  const filtered = alerts.filter(a => (severity === 'all' || a.severity === severity) &&
+    (status==='all' || a.status===status) &&
+    [a.flightNumber,a.callsign,a.title,a.airline,a.origin,a.destination].some(v => v.toLowerCase().includes(query.trim().toLowerCase())));
+  async function update(id:string, next:'acknowledged'|'resolved') {
+    setBusy(id);setActionError('');
+    try {await apiFetch(API_ENDPOINTS.alerts+'/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({status:next})});onRefresh();}
+    catch(e){setActionError(e instanceof Error?e.message:'Update failed.');}
+    finally {setBusy('');}
+  }
+  async function enable() {
+    if(notificationsOn){try{localStorage.setItem('flightpulse.notifications','off');setNotificationsOn(false);setNotification('Desktop alerts paused. Your inbox continues to update.');}catch{setNotification('Browser preferences could not be saved.');}return;}
+    if (!('Notification' in window)) {setNotification('Desktop notifications are unavailable in this browser.');return;}
+    try {
+      const permission=await Notification.requestPermission();
+      if(permission==='granted'){localStorage.setItem('flightpulse.notifications','on');setNotificationsOn(true);setNotification('Desktop notifications enabled while FlightPulse is open.');}
+      else setNotification('Notifications were not enabled. You can allow them in browser site settings.');
+    } catch {setNotification('Notifications could not be enabled in this browser.');}
+  }
+  return <div className="ops-alert-grid">
+    <section className="ops-alert-summary">
+      <div className="ops-ticket-top"><span><ShieldCheck size={19}/> Operations inbox</span></div>
+      <strong className="ops-total">{error || loading ? '—' : alerts.filter(a=>a.status==='ACTIVE').length}</strong>
+      <p>Open alerts · latest 100 records</p>
+      <div className="ops-breakdown">{levels.map(level => <div key={level}><span><i className={'ops-dot '+level}/>{level}</span><b>{loading || error ? '—' : alerts.filter(a=>a.severity===level&&a.status==='ACTIVE').length}</b></div>)}</div>
+      <button className="ops-secondary" onClick={enable}><BellRing size={17}/>{notificationsOn?'Pause desktop alerts':'Enable desktop alerts'}</button>
+      <p className="ops-notification-note" role="status">{notification || 'Get a desktop notification for new alerts while the application is open. Email delivery requires server SMTP configuration.'}</p>
+    </section>
+    <section className="ops-card ops-inbox"><header className="ops-card-heading"><span className="ops-icon"><Inbox size={21}/></span><div><h2>Alert inbox</h2><p>Persistent records with source evidence</p></div><button className="ops-quiet ops-refresh" aria-label="Refresh alert inbox" onClick={onRefresh} disabled={loading}><RefreshCw size={17}/></button></header>
+      <div className="ops-filters"><label className="ops-search"><Search size={17}/><input aria-label="Search alerts" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search flight, airline or alert"/></label>
+        <label className="ops-severity"><select aria-label="Severity" value={severity} onChange={e=>setSeverity(e.target.value)}><option value="all">All severities</option>{levels.map(level=><option key={level} value={level}>{level}</option>)}</select></label>
+        <label className="ops-severity"><select aria-label="Alert status" value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All statuses</option><option value="ACTIVE">Open</option><option value="MONITORING">Acknowledged</option><option value="RESOLVED">Resolved</option></select></label></div>
+      {actionError&&<p role="alert" className="ops-error">{actionError}</p>}
+      {error ? <p className="ops-error" role="alert">{error}</p> : loading && !alerts.length ? <p className="ops-notice" role="status">Loading alert inbox…</p> :
+        !filtered.length ? <div className="ops-empty"><span><ShieldCheck size={29}/></span><h3>{alerts.length ? 'No matching alerts' : 'No alerts recorded'}</h3><p>{alerts.length ? 'Try another filter.' : 'Save a disruption from the dataset map or run the Kafka consumer to receive live telemetry review flags.'}</p></div> :
+        <div className="ops-inbox-list">{filtered.map(a=><details key={a.id}><summary><i className={'ops-dot '+a.severity}/><div><strong>{a.title}</strong><small>{a.airline} · {a.origin}–{a.destination} · {new Date(a.detectionTime).toLocaleString()}</small></div><span className="ops-level">{a.status==='ACTIVE'?'Open':a.status==='MONITORING'?'Acknowledged':'Resolved'}</span></summary>
+          <div className="ops-alert-detail"><span className="ops-pill">{a.source==='historical_bts'?'Historical BTS':a.source==='opensky'?'Live OpenSky':a.source==='adsb_lol'?'Live adsb.lol':'Demonstration'}</span><p>{a.explanation}</p>
+            <p>Delivery: {a.deliveryStatus==='sent'?'Accepted by email server':a.deliveryStatus==='pending'?'Email queued':a.deliveryStatus==='failed'?'Email failed · '+a.deliveryError:'Saved in application'}</p>
+            <div className="ops-alert-actions">{a.status==='ACTIVE'&&<button className="ops-secondary" disabled={!!busy} onClick={()=>update(a.id,'acknowledged')}><Check size={16}/>Acknowledge</button>}
+              {a.status!=='RESOLVED'&&<button className="ops-secondary" disabled={!!busy} onClick={()=>update(a.id,'resolved')}><ShieldCheck size={16}/>Resolve</button>}</div>
+          </div></details>)}</div>}
+    </section>
+  </div>;
 }
-
-export const AlertsCenter: React.FC<AlertsCenterProps> = ({
-  alerts,
-  flights,
-  onLocateOnMap,
-}) => {
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Filter alerts
-  const filteredAlerts = alerts.filter((alert) => {
-    if (severityFilter !== 'all' && alert.severity !== severityFilter) {
-      return false;
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const match =
-        alert.flightNumber.toLowerCase().includes(q) ||
-        alert.callsign.toLowerCase().includes(q) ||
-        alert.airline.toLowerCase().includes(q) ||
-        alert.title.toLowerCase().includes(q) ||
-        alert.origin.toLowerCase().includes(q) ||
-        alert.destination.toLowerCase().includes(q);
-      if (!match) return false;
-    }
-    return true;
-  });
-
-  const criticalCount = alerts.filter((a) => a.severity === 'critical').length;
-  const highCount = alerts.filter((a) => a.severity === 'high').length;
-  const mediumCount = alerts.filter((a) => a.severity === 'medium').length;
-
-  return (
-    <div className="flex-1 p-4 md:p-6 space-y-6 max-w-7xl mx-auto overflow-y-auto text-slate-100">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-6 h-6 text-red-400" />
-            <h1 className="font-mono text-2xl font-black tracking-wider text-slate-100">
-              TACTICAL ALERTS &amp; ANOMALIES CENTER
-            </h1>
-          </div>
-          <p className="text-xs text-slate-400 font-sans mt-1">
-            Demonstration alerts from evaluated flight risk assessments
-          </p>
-        </div>
-
-        {/* Severity Count Summary */}
-        <div className="flex items-center gap-2 font-mono text-xs">
-          <span className="px-2.5 py-1 rounded-md bg-red-950/60 border border-red-500/40 text-red-400 font-bold">
-            {criticalCount} CRITICAL
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-orange-950/60 border border-orange-500/40 text-orange-400 font-bold">
-            {highCount} HIGH
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-amber-950/60 border border-amber-500/40 text-amber-300 font-bold">
-            {mediumCount} MEDIUM
-          </span>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 backdrop-blur-md">
-        {/* Search Input */}
-        <div className="relative w-full sm:w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search alerts by flight, airline, title..."
-            className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
-          />
-        </div>
-
-        {/* Severity Filter Buttons */}
-        <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          {['all', 'critical', 'high', 'medium', 'low'].map((sev) => (
-            <button
-              key={sev}
-              onClick={() => setSeverityFilter(sev)}
-              className={`px-3 py-1 rounded-lg text-xs font-mono uppercase tracking-wider transition-colors ${
-                severityFilter === sev
-                  ? 'bg-cyan-500/20 border border-cyan-500/60 text-cyan-300 font-bold'
-                  : 'bg-slate-950/60 border border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {sev}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Alerts List */}
-      <div className="space-y-3.5">
-        {filteredAlerts.length === 0 ? (
-          <div className="p-12 text-center text-slate-500 font-mono text-xs rounded-xl border border-slate-800 bg-slate-900/30">
-            No active alerts matching your filter criteria.
-          </div>
-        ) : (
-          filteredAlerts.map((alert) => {
-            const associatedFlight = flights.find((f) => f.id === alert.flightId);
-            const isCrit = alert.severity === 'critical';
-
-            return (
-              <div
-                key={alert.id}
-                className={`p-4 sm:p-5 rounded-xl border transition-all backdrop-blur-md relative overflow-hidden ${
-                  isCrit
-                    ? 'bg-red-950/20 border-red-500/50 hover:bg-red-950/30 shadow-[0_0_20px_rgba(239,68,68,0.12)]'
-                    : 'bg-slate-900/60 border-slate-800/80 hover:bg-slate-900/90'
-                }`}
-              >
-                {/* Left accent color indicator */}
-                <div
-                  className={`absolute left-0 top-0 bottom-0 w-1.5 ${
-                    isCrit
-                      ? 'bg-red-500 animate-pulse'
-                      : alert.severity === 'high'
-                      ? 'bg-orange-500'
-                      : 'bg-amber-500'
-                  }`}
-                />
-
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <SeverityBadge severity={alert.severity} />
-                    <span className="font-mono font-bold text-sm text-slate-100 tracking-wider">
-                      {alert.callsign}
-                    </span>
-                    <span className="text-xs font-mono text-slate-400">
-                      ({alert.airline} • {alert.flightNumber})
-                    </span>
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800/60 text-slate-300">
-                      {alert.origin} ➔ {alert.destination}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
-                    <Clock className="w-3.5 h-3.5 text-slate-500" />
-                    <span>{alert.detectionTime}</span>
-                  </div>
-                </div>
-
-                {/* Alert Title */}
-                <h3 className="font-mono text-sm font-bold text-slate-100 mb-1.5">
-                  {alert.title}
-                </h3>
-
-                {/* Explanation */}
-                <p className="text-xs font-sans text-slate-300 leading-relaxed max-w-4xl mb-3">
-                  {alert.explanation}
-                </p>
-
-                {/* Telemetry and Action Row */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-slate-800/60 text-xs font-mono">
-                  {/* Telemetry Snapshot */}
-                  <div className="flex items-center gap-4 text-slate-400">
-                    {associatedFlight && (
-                      <>
-                        <span>
-                          ALT:{' '}
-                          <strong className="text-slate-200">
-                            FL{(associatedFlight.telemetry.altitudeFt == null ? 'unknown' : Math.round(associatedFlight.telemetry.altitudeFt / 100))}
-                          </strong>
-                        </span>
-                        <span>
-                          SPD:{' '}
-                          <strong className="text-slate-200">
-                            {associatedFlight.telemetry.groundSpeedKts} kt
-                          </strong>
-                        </span>
-                        <span>
-                          SQK:{' '}
-                          <strong className="text-slate-200">
-                            {associatedFlight.telemetry.squawk}
-                          </strong>
-                        </span>
-                      </>
-                    )}
-                    <span>
-                      RISK SCORE:{' '}
-                      <strong className="text-red-400">{alert.riskScore}/100</strong>
-                    </span>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      disabled={!associatedFlight} onClick={() => onLocateOnMap(alert.flightId)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 hover:text-cyan-200 font-mono text-xs transition-colors shadow-sm"
-                    >
-                      <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>LOCATE ON MAP</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-};

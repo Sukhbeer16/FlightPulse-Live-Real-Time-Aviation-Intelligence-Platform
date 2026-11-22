@@ -43,6 +43,7 @@ def store_batch(frame, batch_id):
                        coalesce(sum(velocity),0),count(velocity),max(abs(vertical_rate))
                        FROM observations GROUP BY source,aircraft,observed/300""")
         accepted = []
+        events = []
         for record in frame.toLocalIterator():
             try:
                 event = Observation.model_validate_json(bytes(record.value or b""))
@@ -60,6 +61,7 @@ def store_batch(frame, batch_id):
                     ),
                 )
                 continue
+            events.append(event)
             inserted = db.execute(
                 "INSERT OR IGNORE INTO observations VALUES(?,?,?,?,?,?)",
                 (
@@ -121,6 +123,39 @@ def store_batch(frame, batch_id):
                     peak_rate,excluded.peak_rate)""",
                     (source, aircraft, start, n, speed or 0, speeds, peak),
                 )
+    from backend.app.services.alerts import create_observation_alert
+    for event in events:
+        create_observation_alert(event)
+
+
+def latest_states(max_age=120):
+    """Only fresh provider positions, never simulation or archived aircraft."""
+    import time
+    path = database()
+    if not path.exists():
+        return {"status": "awaiting_stream", "time": None, "aircraft": [], "transport": "kafka"}
+    with closing(sqlite3.connect(path, timeout=5)) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='observations'").fetchone():
+            return {"status": "awaiting_stream", "time": None, "aircraft": [], "transport": "kafka"}
+        latest = db.execute("SELECT max(observed) FROM observations WHERE source IN ('opensky','adsb_lol')").fetchone()[0]
+        rows = db.execute("""SELECT payload FROM (SELECT payload, row_number() OVER
+            (PARTITION BY aircraft ORDER BY observed DESC) AS rank FROM observations
+            WHERE source IN ('opensky','adsb_lol') AND observed>=?) WHERE rank=1 LIMIT 2000""", (time.time() - max_age,)).fetchall()
+    aircraft = []
+    for row in rows:
+        event = Observation.model_validate_json(row[0])
+        s = event.state
+        if s.longitude is None or s.latitude is None or s.time_position is None or time.time() - s.time_position > max_age:
+            continue
+        aircraft.append(dict(id=s.icao24, callsign=s.callsign or s.icao24.upper(), registration=None, type=None,
+                             lon=s.longitude, lat=s.latitude, ground=s.on_ground,
+                             altitude=None if s.barometric_altitude_m is None else s.barometric_altitude_m * 3.28084,
+                             speed=None if s.velocity_mps is None else s.velocity_mps * 1.94384,
+                             heading=s.true_track_degrees,
+                             verticalRate=None if s.vertical_rate_mps is None else s.vertical_rate_mps * 196.85,
+                             observed=s.last_contact * 1000, squawk=s.squawk, provider=event.source))
+    return {"status": "available" if aircraft else "stale" if latest else "awaiting_stream",
+            "time": latest * 1000 if latest else None, "aircraft": aircraft, "transport": "kafka"}
 
 
 def summary(source):
