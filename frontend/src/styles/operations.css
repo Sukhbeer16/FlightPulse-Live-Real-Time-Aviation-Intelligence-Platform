@@ -90,3 +90,15 @@
 .ops-alert-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.ops-notification-note{font-size:.875rem;color:#c4d9dd;line-height:1.6;margin-top:16px}
 .ops-alert-summary .ops-secondary{margin-top:24px;width:100%}.ops-filters{flex-wrap:wrap}.ops-filters .ops-search{flex:1;min-width:180px}
 .ops-source-search{display:flex;align-items:end;gap:10px;margin:18px 0 12px}.ops-source-search label{flex:1;display:grid;gap:6px;font-size:.94rem;color:#405b6b}.ops-source-search input{border:1px solid #bacbd2;border-radius:7px;height:44px;padding:8px 12px;min-width:0;width:100%;font-size:1rem}.ops-checkbox{display:flex;align-items:center;gap:8px;font-size:.94rem;margin:14px 0 20px;color:#405b6b}
+.dataset-route-browser{padding:12px 16px;border-bottom:1px solid #29465a;color:#c9dde7;font-size:12px;max-height:270px;overflow:auto}
+.dataset-route-browser p{margin:0 0 8px}
+.dataset-route-browser label{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dataset-route-browser select{min-width:0;flex:1;background:#102a3c;color:#e7f5fa;border:1px solid #4d6e80;border-radius:6px;padding:5px}
+.dataset-route-list{display:grid;gap:4px}
+.dataset-route-list button{display:flex;align-items:center;gap:8px;text-align:left;background:#173449;color:#e7f5fa;border:1px solid #294d60;border-radius:5px;padding:6px;cursor:pointer}
+.dataset-route-list button:hover{border-color:#58dec4}
+.dataset-route-list span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dataset-route-list small{color:#b0cbd5}
+.dataset-route-pages{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.dataset-route-pages button{background:#173449;color:#e7f5fa;border:1px solid #4d6e80;border-radius:5px;padding:4px 7px;cursor:pointer}
+.dataset-route-pages button:disabled{opacity:.45;cursor:default}

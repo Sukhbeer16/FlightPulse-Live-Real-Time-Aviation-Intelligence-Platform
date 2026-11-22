@@ -23,6 +23,7 @@ from pipelines.ml.train_models import (
     evaluate_selected_test_once,
     make_preprocessor,
     select_validation_candidate,
+    select_validation_threshold,
     validate_feature_names,
     validate_partition_dates,
 )
@@ -78,6 +79,17 @@ def test_preprocessor_fits_categories_only_on_training_and_is_sparse() -> None:
         preprocessor.named_transformers_["numeric"].mean_,
         training_scaler_mean,
     )
+    assert all(f"is_missing_{name}" in preprocessor.get_feature_names_out()
+               for name in NUMERIC_FEATURES)
+
+
+def test_threshold_is_selected_only_from_validation_probabilities() -> None:
+    truth=np.array([0,0,0,0,1,1],dtype=np.int8)
+    scores=np.array([.05,.08,.11,.15,.10,.30])
+    threshold,rule=select_validation_threshold(truth,scores)
+    assert rule == "max_F2_with_precision_at_least_0.25"
+    assert 0 < threshold < 0.5
+    assert calculate_metrics(truth,scores,threshold=threshold)["f2"] > calculate_metrics(truth,scores,threshold=.5)["f2"]
 
 
 def test_metrics_treat_delayed_as_positive_and_report_full_confusion_matrix() -> None:

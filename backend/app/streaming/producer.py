@@ -59,7 +59,7 @@ def main():
     from confluent_kafka import Producer
     parser = argparse.ArgumentParser()
     parser.add_argument("--simulation", action="store_true")
-    parser.add_argument("--provider", choices=["opensky", "adsb-lol"], default="opensky")
+    parser.add_argument("--provider", choices=["opensky", "adsb-lol"], default="adsb-lol")
     parser.add_argument("--once", action="store_true", help="Publish one provider snapshot and exit.")
     parser.add_argument(
         "--bounds",
@@ -139,6 +139,11 @@ def main():
                 raise SystemExit("ADS-B provider unavailable; no snapshot delivered") from None
             delay = min(900, delay * 2)
             logging.warning("ADS-B provider unavailable; next attempt in %d seconds", delay)
+        except (RuntimeError, BufferError) as exc:
+            if args.once:
+                raise SystemExit("Kafka delivery failed; no complete snapshot delivered") from None
+            delay = min(900, delay * 2)
+            logging.warning("Kafka delivery failed (%s); next attempt in %d seconds", type(exc).__name__, delay)
         time.sleep(delay)
 
 

@@ -56,6 +56,8 @@ def run():
         value = response.value.json()
         assert value["status"] == "available", value
         assert value["selection"]["compared_models"] == 4
+        assert value["model_id"] == "phase4.2-retrained-logistic-regression-unweighted"
+        assert 0 < value["threshold"] < 0.5
         expect(page.get_by_text("selected from 4 models", exact=False)).to_be_visible()
         expect(page.get_by_role("heading", name="What influenced the forecast?")).to_be_visible()
         expect(page.get_by_role("heading", name="Why was this flight late?")).to_be_visible()
@@ -63,6 +65,13 @@ def run():
         visit("live-tracking")
         page.get_by_role("button", name="Dataset flights", exact=True).click()
         expect(page.get_by_role("heading", name="Flights in your dataset")).to_be_visible()
+        expect(page.get_by_label("Dataset city")).to_contain_text("Atlanta, GA")
+        page.get_by_label("Dataset city").select_option("Atlanta, GA")
+        expect(page.locator(".dataset-route-list button").first).to_be_visible()
+        page.get_by_label("Dataset airport").select_option("ATL")
+        expect(page.locator(".dataset-route-list button").first).to_be_visible()
+        page.locator(".dataset-route-list button").first.click()
+        expect(page.get_by_label("Dataset origin")).not_to_have_value("")
         page.locator(".traffic-list button").first.click()
         expect(page.get_by_role("heading", name="Why was this flight late?")).to_be_visible()
         page.get_by_role("button", name="Kafka stream", exact=True).click()
@@ -86,6 +95,17 @@ def run():
         expect(
             page.get_by_text(alert["title"], exact=True).first
         ).to_be_visible()
+        page.get_by_label("Alert type").select_option("historical_delay")
+        page.get_by_label("Search alerts").fill(alert["flight_reference"])
+        record=page.locator(".ops-inbox-list details").filter(has_text=alert["title"]).first
+        expect(record).to_be_visible()
+        record.locator("summary").click()
+        if record.get_by_role("button",name="Acknowledge").count():
+            record.get_by_role("button",name="Acknowledge").click()
+            expect(record.get_by_text("Acknowledged",exact=True)).to_be_visible()
+        if record.get_by_role("button",name="Resolve").count():
+            record.get_by_role("button",name="Resolve").click()
+            expect(record.get_by_text("Resolved",exact=True)).to_be_visible()
         for route in ["overview", "settings", "assistant", "system-status"]:
             visit(route)
             expect(page.get_by_role("heading").first).to_be_visible()

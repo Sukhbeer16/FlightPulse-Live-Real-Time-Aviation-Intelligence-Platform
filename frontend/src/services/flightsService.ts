@@ -202,6 +202,7 @@ export async function fetchHistoricalFlights(params: {
   airlineCode?: string;
   origin?: string;
   destination?: string;
+  airport?: string;
   dateFrom?: string;
   dateTo?: string;
   cancelled?: boolean;
@@ -219,6 +220,7 @@ export async function fetchHistoricalFlights(params: {
   if (params.airlineCode) query.set('airline_code', params.airlineCode);
   if (params.origin) query.set('origin', params.origin);
   if (params.destination) query.set('destination', params.destination);
+  if (params.airport) query.set('airport', params.airport);
   if (params.dateFrom) query.set('date_from', params.dateFrom);
   if (params.dateTo) query.set('date_to', params.dateTo);
   if (params.cancelled !== undefined) query.set('cancelled', String(params.cancelled));
@@ -575,15 +577,25 @@ export function filterFlights(
   });
 }
 
-export async function fetchAlerts(): Promise<AviationAlert[]> {
+export async function fetchAlertPage(params: {page?:number;pageSize?:number;status?:string;severity?:string;type?:string;search?:string;includeDemo?:boolean} = {}): Promise<{data:AviationAlert[];total:number;totalPages:number}> {
+  const query=new URLSearchParams({page:String(params.page??1),page_size:String(params.pageSize??20),include_demo:String(params.includeDemo??false)});
+  if(params.status)query.set('status',params.status);
+  if(params.severity)query.set('severity',params.severity);
+  if(params.type)query.set('alert_type',params.type);
+  if(params.search)query.set('search',params.search);
     const response = await apiFetch<{
     data_kind: 'operational_alerts';
+    pagination:{total:number;total_pages:number};
     data: Array<{
       id: string;
       alert_type: string;
       severity: 'info' | 'warning' | 'high';
       flight_reference: string | null;
       timestamp: string;
+      updated_at: string | null;
+      acknowledged_at: string | null;
+      resolved_at: string | null;
+      evidence_time: string | null;
       explanation: string;
       factors: Array<{ source: string; factor: string; contribution: number }>;
       source: 'demonstration' | 'historical_bts' | 'opensky' | 'adsb_lol';
@@ -596,9 +608,14 @@ export async function fetchAlerts(): Promise<AviationAlert[]> {
       confidence_status: string;
       status: 'open' | 'acknowledged' | 'resolved';
     }>;
-  }>(API_ENDPOINTS.alerts + '?page_size=100');
-  return response.data.map((alert) => ({
+  }>(API_ENDPOINTS.alerts + '?' + query);
+  return {total:response.pagination.total,totalPages:response.pagination.total_pages,data:response.data.map((alert) => ({
     id: alert.id,
+    alertType: alert.alert_type,
+    updatedAt: alert.updated_at,
+    acknowledgedAt: alert.acknowledged_at,
+    resolvedAt: alert.resolved_at,
+    evidenceTime: alert.evidence_time,
     flightId: alert.flight_reference ?? '',
     flightNumber: alert.flight_reference ?? 'N/A',
     airline: alert.airline ?? alert.source,
@@ -617,8 +634,12 @@ export async function fetchAlerts(): Promise<AviationAlert[]> {
     source: alert.source,
     deliveryStatus: alert.delivery_status,
     deliveryError: alert.delivery_error,
-  }));
+  }))};
 
+}
+
+export async function fetchAlerts(): Promise<AviationAlert[]> {
+  return (await fetchAlertPage({pageSize:100,includeDemo:true})).data;
 }
 
 export async function checkBackendHealth(): Promise<{

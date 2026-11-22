@@ -88,6 +88,8 @@ class ProcessedParquetFlightRead(BaseModel):
     airline_name: str | None = None
     origin_name: str | None = None
     destination_name: str | None = None
+    origin_city: str | None = None
+    destination_city: str | None = None
     origin_coordinates: tuple[float, float] | None = None
     destination_coordinates: tuple[float, float] | None = None
     carrier_delay_minutes: float | None = None

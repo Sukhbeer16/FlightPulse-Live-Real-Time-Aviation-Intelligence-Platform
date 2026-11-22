@@ -13,6 +13,7 @@ export const API_ENDPOINTS = {
   flights: `${API_BASE_URL}/api/v1/flights`,
   flightSearch: `${API_BASE_URL}/api/v1/flights/search`,
   historicalFlights: `${API_BASE_URL}/api/v1/historical/processed-flights`,
+  mapCoverage: `${API_BASE_URL}/api/v1/historical/map-coverage`,
   airlines: `${API_BASE_URL}/api/v1/airlines`,
   airports: `${API_BASE_URL}/api/v1/airports`,
   analyticsOverview: `${API_BASE_URL}/api/v1/analytics/overview`,

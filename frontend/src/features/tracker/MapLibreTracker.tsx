@@ -95,8 +95,8 @@ export function MapLibreTracker({ aircraft, selected, onSelect, center, globe, o
       map.addLayer({id:'traffic-3d',type:'fill-extrusion',source:'elevated',layout:{visibility:'none'},
         paint:{'fill-extrusion-color':['get','color'],'fill-extrusion-base':['get','altitude'],
           'fill-extrusion-height':['+', ['get','altitude'], 20], 'fill-extrusion-vertical-gradient':false}});
-      setReady(true);
     });
+    map.on('load', () => setReady(true));
     const tooltip = new maplibregl.Popup({closeButton:false,closeOnClick:false,offset:11,className:'scope-tooltip'});
     for (const layer of ['traffic','traffic-3d']) {
       map.on('click',layer,e=>{const id=e.features?.[0]?.properties.id;if(id) onSelect(id);tooltip.remove();});

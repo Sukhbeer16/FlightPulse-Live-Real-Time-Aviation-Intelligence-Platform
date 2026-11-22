@@ -53,13 +53,11 @@ def _load_anomaly_model() -> tuple[Any, dict[str, Any]]:
 def detect_anomaly(request: AnomalyDetectionRequest) -> dict[str, Any]:
     model, manifest = _load_anomaly_model()
     try:
-        base_manifest = json.loads(
-            (
-                get_settings().data_directory
-                / MODEL_DIRECTORY
-                / "experiment_manifest.json"
-            ).read_text(encoding="utf-8")
-        )
+        directory = get_settings().data_directory / MODEL_DIRECTORY
+        base_path = directory / "isolation_forest_base_manifest.json"
+        if not base_path.is_file():
+            base_path = directory / "experiment_manifest.json"
+        base_manifest = json.loads(base_path.read_text(encoding="utf-8"))
         row = _feature_row(request, base_manifest)
         frame = pd.DataFrame([row], columns=FEATURES)
         raw_score = float(model.decision_function(frame)[0])

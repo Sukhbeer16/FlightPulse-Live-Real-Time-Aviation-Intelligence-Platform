@@ -63,7 +63,7 @@ FEATURES = [
 ]
 LIMITATIONS = [
     "Experimental estimate only; trained on BTS January-February 2024 data.",
-    "Model output is not calibrated; treat the score as relative, not as a literal probability.",
+    "Calibration is limited to January-February 2024; treat the score as an experimental estimate.",
     "These historical models are not operationally validated and can miss delays.",
     "The model estimates arrival delay greater than 15 minutes and does not use live flight state.",
     "Feature sensitivities and any linear logit contributions are model associations, not causal explanations.",
@@ -220,18 +220,28 @@ def predict_delay(
     except Exception as error:
         raise PredictionUnavailable("The model could not score this request.") from error
     candidate = MODEL_CANDIDATES[model_name]
+    if model_name == "logistic-regression":
+        selected = manifest.get("model_selection", {}).get("selected_candidate", "")
+        if selected.startswith("logistic_regression_"):
+            candidate = selected
     validation_metrics = manifest.get("validation_metrics", {})
     candidate_metrics = validation_metrics.get(candidate, {})
     threshold = float(candidate_metrics.get("threshold", 0.5))
     limitations = list(LIMITATIONS)
-    if model_name == "logistic-regression":
-        limitations.append("This artifact's held-out test recall was only 0.0590 at threshold 0.5; a low score cannot rule out a delay.")
+    final_metrics = manifest.get("final_test_metrics", {})
+    if final_metrics.get("recall") is not None:
+        limitations.append(
+            f"Held-out test recall was {final_metrics['recall']:.3f} and precision was "
+            f"{final_metrics['precision']:.3f} at threshold {final_metrics['threshold']:.3f}; "
+            "a low score cannot rule out a delay."
+        )
     return {
         "status": "available",
-        "model_id": MODEL_SPECS[model_name]["model_id"],
+        "model_id": ("phase4.2-retrained-logistic-regression-unweighted"
+                     if candidate == "logistic_regression_unweighted" else MODEL_SPECS[model_name]["model_id"]),
         "target": "arrival delay greater than 15 minutes",
         "model_score": probability,
-        "score_interpretation": "Uncalibrated relative model score on a 0-to-1 scale.",
+        "score_interpretation": "Experimental model score on a 0-to-1 scale; calibration is limited.",
         "threshold": threshold,
         "predicted_class": "delayed" if probability >= threshold else "not_delayed",
         "explanation": (
@@ -254,7 +264,9 @@ def select_best_model() -> tuple[str, dict[str, Any]]:
         report = json.loads((directory / "validation_metrics.json").read_text(encoding="utf-8"))
         metrics = report["candidates"]
         ranked = []
-        for name, candidate in MODEL_CANDIDATES.items():
+        for name, default_candidate in MODEL_CANDIDATES.items():
+            candidate = (report.get("logistic_weighting_candidate_selected_for_artifact", default_candidate)
+                         if name == "logistic-regression" else default_candidate)
             values = metrics[candidate]
             rank = tuple(float(values[key]) for key in ("f2", "pr_auc", "recall", "precision"))
             if not all(math.isfinite(value) and 0 <= value <= 1 for value in rank):

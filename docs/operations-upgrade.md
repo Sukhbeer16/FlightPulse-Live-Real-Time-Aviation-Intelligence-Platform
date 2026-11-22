@@ -4,9 +4,9 @@ The existing app now has three separate map sources: **Live radar**, **Dataset f
 
 ## Forecasts
 
-The delay page returns one forecast. `POST /api/v1/predictions/delay` defaults to `model=best`. The backend ranks the four deployed Phase 4.2 artifacts using validation F2, then PR-AUC, recall and precision, following the saved experiment's selection rule. It selects the highest-ranked loadable artifact, reports any skipped artifacts, and fails explicitly if no valid report/model exists. Individual model endpoints remain available for research clients.
+The delay page returns one forecast. `POST /api/v1/predictions/delay` defaults to `model=best`. The backend ranks the four deployed model families using validation F2, then PR-AUC, recall and precision. Each candidate's decision threshold is tuned on validation with a 0.25 precision floor where feasible. It selects the highest-ranked loadable artifact, reports any skipped artifacts, and fails explicitly if no valid report/model exists. Individual model endpoints remain available for research clients.
 
-The current winner is balanced logistic regression. Selection uses held-out validation performance, not whichever model gives the largest prediction for a flight. The saved model remains experimental: its test recall was about 0.059 at threshold 0.5. This change does not retrain or calibrate it, establish production accuracy, or turn a score into a delay duration.
+The retrained winner is unweighted logistic regression at threshold 0.160998. The previous model's test recall was 0.059 at threshold 0.5; the new test recall is 0.270 with precision 0.235. PR-AUC is still only 0.209. Selection uses held-out validation performance, not whichever model gives the largest score for a flight. Scores remain experimental and are not delay durations or well-calibrated probabilities. See [model evaluation](model-evaluation.md) for the complete comparison and limitations.
 
 Choose a dataset record to fill the full schedule and distance inputs, or enter a custom schedule. Local sensitivity factors compare the selected model's output against training-median numeric inputs or unknown categorical values. They describe associations, not causes. Binary logistic contributions now use the correct coefficient row.
 
@@ -16,14 +16,14 @@ Historical search now exposes the source's carrier, weather, national-airspace, 
 
 Airline names are joined using `DOT_ID_Reporting_Airline` against `data/reference/Carrier_Decode.zip`. Airport names and coordinates use exact airport sequence IDs against `Master_Coordinate.zip`. These are existing local BTS reference archives; missing reference rows are not guessed. No historical record is attached to an unrelated live callsign.
 
-The dataset map supports airport, carrier, flight-number, date and delay filters, with server-side pagination. Lines connect recorded origin and destination airports. Plane icons mark schematic route midpoints; they are not actual historical tracks or live positions. Overlapping routes share marker locations; every flight remains selectable in the list. Records without reference coordinates remain in the list.
+The dataset map aggregates 334 airports, 328 source named cities and 5,757 directed routes from 1,066,492 actual records. The map pages through aggregated routes, and the flight roster pages through source rows. City, airport, carrier, flight-number, date and delay filters are available. Lines connect recorded origin and destination airports. Plane icons mark schematic route midpoints; they are not actual historical tracks or live positions. Records without reference coordinates remain in the list. See [map data](map-data.md).
 
 ## Persistent alerts and delivery
 
 Alerts live in `data/operations/alerts.sqlite`, survive API restarts, and support open → acknowledged → resolved workflows. Historical alerts use deterministic source-file/row IDs; telemetry review alerts use provider/aircraft/five-minute-window IDs. Replays do not duplicate alerts or reopen a resolved record.
 
 - `POST /api/v1/alerts/historical`: accepts only `source_file` and `source_row_number`, reloads the actual source record, and rejects missing/on-time records. Historical alerts are explicitly labelled historical.
-- `GET /api/v1/alerts`: paginated filters for severity and status. The current inbox displays the latest 100 records.
+- `GET /api/v1/alerts`: paginated filters for severity, status, type, search and demonstration inclusion. `GET /alerts/counts` summarizes all operational records. The inbox pages through the full store.
 - `PATCH /api/v1/alerts/{id}`: acknowledge or resolve; an acknowledgement cannot reopen a resolved alert.
 - Existing `/alerts/evaluate` is retained as an explicitly labelled demonstration endpoint. The main user flows no longer use it.
 
@@ -83,6 +83,20 @@ The lightweight consumer is an alternative to the existing Spark consumer. Use o
 The local stack uses a single broker and SQLite. Kafka observations, rejects and aggregates are durable but have no automated database retention policy. Back up the store alongside checkpoints; archive old data as operational volume grows. Authentication, per-user inboxes and distributed deployment are outside this upgrade. Keep this configuration bound to localhost.
 
 ## Verification
+
+The 22 November repair run retrained all four model families on the
+chronological January–February dataset and selected an unweighted logistic
+pipeline with a validation-tuned 0.160998 threshold. The previous delay
+artifacts were backed up before promotion; the original Isolation Forest
+remained paired with its preprocessing manifest. Backend regression tests
+passed after promotion. The dataset aggregation returned 334 airports,
+328 cities and 5,757 directed routes. Kafka delivered and persisted 149
+fresh provider observations, then 148 after broker and consumer restart.
+A later running-consumer snapshot returned 156 real aircraft through the API,
+and Edge displayed all 156 with no page errors. The browser smoke flow passed
+all routes, the city and route selection, forecast and alert interactions.
+See [model evaluation](model-evaluation.md), [map data](map-data.md),
+[delay reasons](delay-reasons.md), and [alerts](alerts.md).
 
 On 22 November 2026, the local Kafka 4.0.1 broker accepted a fresh public
 ADS-B snapshot of 144 observations. The lightweight consumer persisted the

@@ -174,7 +174,10 @@ def get_model_catalog() -> list[ModelCatalogEntry]:
     feature_count = len(features) if isinstance(features, list) else None
     manifest_valid = (
         features == FEATURES
-        and model_selection.get("selected_candidate") == "logistic_regression_balanced"
+        and model_selection.get("selected_candidate") in {
+            "logistic_regression_balanced", "logistic_regression_unweighted",
+            "decision_tree", "random_forest", "xgboost",
+        }
         and expected_sklearn == installed_sklearn
     )
 
@@ -266,7 +269,8 @@ def get_model_catalog() -> list[ModelCatalogEntry]:
             )
             continue
 
-        candidate = spec["candidate"]
+        candidate = (validation_report.get("logistic_weighting_candidate_selected_for_artifact", spec["candidate"])
+                     if spec["artifact"] == "logistic_regression.joblib" else spec["candidate"])
         validation_metrics = _metrics(validation_candidates.get(candidate))
         test_metrics = (
             _metrics(final_metrics)
@@ -275,7 +279,8 @@ def get_model_catalog() -> list[ModelCatalogEntry]:
         )
         result.append(
             ModelCatalogEntry(
-                model_id=spec["model_id"],
+                model_id=("phase4.2-retrained-logistic-regression-unweighted"
+                          if candidate == "logistic_regression_unweighted" else spec["model_id"]),
                 algorithm=spec["algorithm"],
                 task="delay_prediction",
                 status="available",

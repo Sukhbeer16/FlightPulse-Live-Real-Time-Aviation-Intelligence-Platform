@@ -71,6 +71,7 @@ def search_processed_flights(
     airline_code=None,
     origin=None,
     destination=None,
+    airport=None,
     flight_date: date | None = None,
     cancelled=None,
     diverted=None,
@@ -99,6 +100,9 @@ def search_processed_flights(
         union = " UNION ALL ".join(source_query(path) for path in paths)
         params = [value for path in paths for value in (path.name, str(path))]
         filters = []
+        if airport is not None:
+            filters.append("(upper(origin_bts_code)=upper(?) OR upper(destination_bts_code)=upper(?))")
+            params.extend((airport, airport))
         for expression, value in (
             ("source_file = ?", source_file),
             ("source_row_number = ?", source_row_number),
@@ -159,6 +163,7 @@ def enrich_record(row):
         airport = airports.get(getattr(row, side + "_airport_seq_id"))
         if airport:
             setattr(row, side + "_name", airport["name"])
+            setattr(row, side + "_city", airport["city"])
             setattr(row, side + "_coordinates", airport["coordinates"])
     row.delay_reasons = [
         {"label": label, "minutes": getattr(row, key), "source": "BTS reported cause"}

@@ -31,6 +31,7 @@ def alert_database():
 
 def save_alert(alert: AlertRead) -> AlertRead:
     settings = get_settings()
+    alert.updated_at = alert.updated_at or alert.timestamp
     if settings.smtp_host and settings.alert_email_to and settings.smtp_from and alert.source != "demonstration":
         alert.delivery_status = "pending"
     with alert_database() as db:
@@ -88,18 +89,43 @@ def list_alerts(
     page_size: int,
     severity: str | None = None,
     status: str | None = None,
+    alert_type: str | None = None,
+    search: str | None = None,
+    include_demo: bool = True,
 ) -> tuple[list[AlertRead], int]:
     filters, params = [], []
     for name, value in (("severity", severity), ("status", status)):
         if value is not None:
             filters.append(name + "=?")
             params.append(value)
+    if alert_type:
+        filters.append("json_extract(payload, '$.alert_type')=?")
+        params.append(alert_type)
+    if not include_demo:
+        filters.append("json_extract(payload, '$.source')!='demonstration'")
+    if search:
+        filters.append("(lower(json_extract(payload, '$.title')) LIKE ? OR lower(coalesce(json_extract(payload, '$.flight_reference'), '')) LIKE ? OR lower(coalesce(json_extract(payload, '$.airline'), '')) LIKE ?)")
+        term = "%" + search.casefold() + "%"
+        params.extend((term, term, term))
     clause = " WHERE " + " AND ".join(filters) if filters else ""
     with alert_database() as db:
         total = db.execute("SELECT count(*) FROM alerts" + clause, params).fetchone()[0]
         rows = db.execute("SELECT payload FROM alerts" + clause + " ORDER BY timestamp DESC, id LIMIT ? OFFSET ?",
                           [*params, page_size, (page - 1) * page_size]).fetchall()
     return [AlertRead.model_validate_json(row[0]) for row in rows], total
+
+
+def alert_counts(include_demo: bool = False) -> dict:
+    clause = "" if include_demo else " WHERE json_extract(payload, '$.source')!='demonstration'"
+    with alert_database() as db:
+        rows = db.execute("SELECT status, severity, count(*) FROM alerts" + clause +
+                          " GROUP BY status, severity").fetchall()
+    return {"total": sum(count for _, _, count in rows),
+            "by_status": {status: sum(count for state, _, count in rows if state == status)
+                          for status in ("open", "acknowledged", "resolved")},
+            "open_by_severity": {level: sum(count for state, severity, count in rows
+                                            if state == "open" and severity == level)
+                                 for level in ("info", "warning", "high")}}
 
 
 def update_alert(alert_id, status):
@@ -111,6 +137,13 @@ def update_alert(alert_id, status):
         alert = AlertRead.model_validate_json(row[0])
         if alert.status == "resolved" and status != "resolved":
             raise ValueError("Resolved alerts cannot be acknowledged again.")
+        now = datetime.now(UTC).isoformat()
+        if alert.status != status:
+            alert.updated_at = now
+            if status == "acknowledged":
+                alert.acknowledged_at = now
+            if status == "resolved":
+                alert.resolved_at = now
         alert.status = status
         db.execute("UPDATE alerts SET status=?, payload=? WHERE id=?", (status, alert.model_dump_json(), alert_id))
         return alert

@@ -31,6 +31,7 @@ from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
     balanced_accuracy_score,
+    brier_score_loss,
     confusion_matrix,
     f1_score,
     fbeta_score,
@@ -54,6 +55,7 @@ from pipelines.ml.feature_dataset import (
     CATEGORICAL_FEATURES,
     FEATURE_ALLOWLIST,
     LEAKAGE_DENYLIST,
+    MISSING_INDICATOR_FEATURES,
     NUMERIC_FEATURES,
     TARGET_COLUMN,
 )
@@ -69,10 +71,12 @@ EXPECTED_PARTITIONS = {
     "test": {"rows": 164_787, "delayed": 23_971, "non_delayed": 140_816},
 }
 MODEL_SELECTION_RULE = (
-    "Select the validation candidate with the highest F2 score at threshold 0.5; "
+    "Tune each candidate's threshold on validation for maximum F2 with precision "
+    "at least 0.25 where feasible; select the highest validation F2. "
     "ties are broken by higher PR-AUC, then recall, then precision. F2 weights "
     "delayed-flight recall more heavily while retaining a precision penalty."
 )
+MIN_VALIDATION_PRECISION = 0.25
 
 
 def validate_feature_names(feature_names: Sequence[str]) -> None:
@@ -244,7 +248,7 @@ def make_preprocessor() -> ColumnTransformer:
             (
                 "numeric",
                 StandardScaler(with_mean=False),
-                list(NUMERIC_FEATURES),
+                list(NUMERIC_FEATURES) + list(MISSING_INDICATOR_FEATURES),
             ),
         ],
         remainder="drop",
@@ -282,6 +286,7 @@ def calculate_metrics(
         "f2": float(fbeta_score(truth, predicted, beta=2, zero_division=0)),
         "roc_auc": float(roc_auc_score(truth, probabilities)),
         "pr_auc": float(average_precision_score(truth, probabilities)),
+        "brier_score": float(brier_score_loss(truth, probabilities)),
         "balanced_accuracy": float(balanced_accuracy_score(truth, predicted)),
         "confusion_matrix": {
             "labels": ["non_delayed", "delayed"],
@@ -291,6 +296,21 @@ def calculate_metrics(
             "true_positive": tp,
         },
     }
+
+
+def select_validation_threshold(y_true: np.ndarray, probabilities: np.ndarray) -> tuple[float, str]:
+    """Tune on validation only; prefer thresholds meeting an explicit precision floor."""
+    precision, recall, thresholds = precision_recall_curve(y_true, probabilities)
+    if not len(thresholds):
+        raise ValueError("No validation thresholds are available.")
+    f2 = 5 * precision[:-1] * recall[:-1] / np.maximum(4 * precision[:-1] + recall[:-1], 1e-12)
+    feasible = np.flatnonzero(precision[:-1] >= MIN_VALIDATION_PRECISION)
+    if len(feasible):
+        indices, rule = feasible, "max_F2_with_precision_at_least_0.25"
+    else:
+        indices, rule = np.arange(len(thresholds)), "max_F2_precision_floor_unattainable"
+    best = int(indices[np.argmax(f2[indices])])
+    return float(thresholds[best]), rule
 
 
 def select_validation_candidate(
@@ -318,12 +338,13 @@ def evaluate_selected_test_once(
     transformed_test: sparse.spmatrix,
     y_test: np.ndarray,
     state: dict[str, bool],
+    threshold: float = CLASSIFICATION_THRESHOLD,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Make one final test prediction call and prevent accidental re-evaluation."""
     if state.get("evaluated", False):
         raise RuntimeError("The test partition has already been evaluated.")
     probabilities = estimator.predict_proba(transformed_test)[:, 1]
-    metrics = calculate_metrics(y_test, probabilities)
+    metrics = calculate_metrics(y_test, probabilities, threshold=threshold)
     state["evaluated"] = True
     return probabilities, metrics
 
@@ -492,12 +513,6 @@ def _train_into_directory(
     x_validation_sparse = x_validation_sparse.tocsr()
     del x_validation
 
-    x_test, y_test = _load_partition("test")
-    x_test_sparse = preprocessor.transform(x_test)
-    if not sparse.issparse(x_test_sparse):
-        raise RuntimeError("Preprocessor unexpectedly produced a dense test matrix.")
-    x_test_sparse = x_test_sparse.tocsr()
-    del x_test
     feature_names = [str(name) for name in preprocessor.get_feature_names_out()]
 
     candidates = _model_candidates()
@@ -521,11 +536,14 @@ def _train_into_directory(
         training_durations[name] = time.perf_counter() - model_started
         probabilities = estimator.predict_proba(x_validation_sparse)[:, 1]
         validation_probabilities[name] = probabilities
-        validation_metrics[name] = calculate_metrics(y_validation, probabilities)
+        threshold, threshold_rule = select_validation_threshold(y_validation, probabilities)
+        validation_metrics[name] = calculate_metrics(y_validation, probabilities, threshold=threshold)
+        validation_metrics[name]["threshold_selection"] = threshold_rule
         fitted[name] = estimator
         importance.extend(_importance_rows(name, estimator, feature_names))
 
     selected_candidate = select_validation_candidate(validation_metrics)
+    selected_threshold = validation_metrics[selected_candidate]["threshold"]
     logistic_candidate = select_validation_candidate(
         {
             name: metrics
@@ -554,10 +572,42 @@ def _train_into_directory(
             compress=3,
         )
 
+    # The final test partition is loaded only after model and threshold selection.
+    x_test, y_test = _load_partition("test")
+    x_test_sparse = preprocessor.transform(x_test)
+    if not sparse.issparse(x_test_sparse):
+        raise RuntimeError("Preprocessor unexpectedly produced a dense test matrix.")
+    x_test_sparse = x_test_sparse.tocsr()
+    test_groups = x_test[["Reporting_Airline", "Origin", "Dest"]].copy()
+    del x_test
     test_state = {"evaluated": False}
     test_probabilities, final_test_metrics = evaluate_selected_test_once(
-        fitted[selected_candidate], x_test_sparse, y_test, test_state
+        fitted[selected_candidate], x_test_sparse, y_test, test_state, selected_threshold
     )
+    final_test_metrics["majority_class_accuracy"] = float(np.mean(y_test == 0))
+    final_test_metrics["prevalence_baseline_brier"] = float(brier_score_loss(
+        y_test, np.full(len(y_test), float(np.mean(y_train)))
+    ))
+    subgroup_metrics = {}
+    for field in ("Reporting_Airline", "Origin", "Dest"):
+        subgroup_metrics[field] = {}
+        for value, count in test_groups[field].value_counts().items():
+            if count < 500:
+                continue
+            mask = (test_groups[field] == value).to_numpy()
+            subgroup_metrics[field][str(value)] = calculate_metrics(
+                y_test[mask], test_probabilities[mask], threshold=selected_threshold
+            )
+    _atomic_json(subgroup_metrics, output_directory / "test_subgroups.json")
+    calibration_bins = []
+    for low in np.linspace(0, 1, 11)[:-1]:
+        high = low + 0.1
+        mask = (test_probabilities >= low) & (test_probabilities < high if high < 1 else test_probabilities <= high)
+        if mask.any():
+            calibration_bins.append({"low": float(low), "high": float(high), "count": int(mask.sum()),
+                                     "mean_score": float(test_probabilities[mask].mean()),
+                                     "observed_delay_rate": float(y_test[mask].mean())})
+    _atomic_json({"bins": calibration_bins}, output_directory / "test_calibration.json")
     _plot_validation_curves(
         y_validation,
         validation_probabilities,
@@ -591,11 +641,12 @@ def _train_into_directory(
     importance_path = output_directory / "feature_importance.csv"
     pd.DataFrame(importance).to_csv(importance_path, index=False)
     validation_payload = {
-        "threshold": CLASSIFICATION_THRESHOLD,
+        "threshold": selected_threshold,
         "positive_class": "delayed",
         "positive_prevalence": float(np.mean(y_validation == 1)),
         "selection_rule": MODEL_SELECTION_RULE,
         "selected_candidate": selected_candidate,
+        "selected_threshold": selected_threshold,
         "logistic_weighting_candidate_selected_for_artifact": logistic_candidate,
         "candidates": validation_metrics,
         "training_seconds": training_durations,
@@ -606,6 +657,7 @@ def _train_into_directory(
         "test_evaluation_calls": 1,
         "selected_candidate": selected_candidate,
         "metrics": final_test_metrics,
+        "selected_threshold": selected_threshold,
     }
     _atomic_json(test_payload, output_directory / "final_test_metrics.json")
 
@@ -656,7 +708,7 @@ def _train_into_directory(
             "categorical": (
                 "OneHotEncoder(handle_unknown='ignore', sparse_output=True)"
             ),
-            "numeric": "passthrough; upstream train-only median imputation retained",
+            "numeric": "StandardScaler(with_mean=False) on numeric values and missing indicators; upstream train-only median imputation retained",
             "fit_partition": "train",
             "train_rows": len(y_train),
             "upstream_imputation": data_manifest["numeric_imputation"],
@@ -666,6 +718,7 @@ def _train_into_directory(
         "model_selection": {
             "rule": MODEL_SELECTION_RULE,
             "selected_candidate": selected_candidate,
+            "selected_threshold": selected_threshold,
             "selection_partition": "validation",
             "test_used_for_selection": False,
         },

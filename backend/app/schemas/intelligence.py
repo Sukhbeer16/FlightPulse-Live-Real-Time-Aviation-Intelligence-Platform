@@ -119,6 +119,9 @@ class AlertRead(BaseModel):
     severity: Literal["info", "warning", "high"]
     flight_reference: str | None
     timestamp: str
+    updated_at: str | None = None
+    acknowledged_at: str | None = None
+    resolved_at: str | None = None
     explanation: str
     factors: list[RiskFactor]
     source: Literal["demonstration", "historical_bts", "opensky", "adsb_lol"]

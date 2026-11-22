@@ -190,12 +190,18 @@ def alerts(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     severity: Literal["info", "warning", "high"] | None = None,
     status: Literal["open", "acknowledged", "resolved"] | None = None,
+    alert_type: Literal["risk_assessment", "statistical_anomaly", "historical_delay", "telemetry_review"] | None = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    include_demo: bool = True,
 ) -> AlertListResponse:
     rows, total = list_alerts(
         page=page,
         page_size=page_size,
         severity=severity,
         status=status,
+        alert_type=alert_type,
+        search=search,
+        include_demo=include_demo,
     )
     total_pages = (total + page_size - 1) // page_size
     return AlertListResponse(
@@ -209,6 +215,12 @@ def alerts(
             has_previous=page > 1 and total > 0,
         ),
     )
+
+
+@router.get("/alerts/counts", summary="Full operational alert counts")
+def alert_count_summary(include_demo: bool = False):
+    from backend.app.services.alerts import alert_counts
+    return alert_counts(include_demo=include_demo)
 
 
 @router.post("/alerts/historical", response_model=AlertRead)

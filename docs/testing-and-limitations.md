@@ -1,6 +1,6 @@
 # Local verification and limitations
 
-> The operations upgrade supersedes the earlier audit below. See [current implementation and verification](operations-upgrade.md). The latest backend run passed 98 tests, with the PostgreSQL-dependent catalog test excluded. The public ADS-B to Kafka to consumer to API path returned 144 fresh aircraft. The current Edge smoke check passed all routes and 149 map tile requests without page errors. Older results below describe the earlier audit.
+> The operations upgrade and [model evaluation](model-evaluation.md) supersede the older audit below. The current backend run passed 102 tests with one PostgreSQL-dependent catalog test excluded. The public ADS-B to Kafka to consumer to browser path displayed 156 fresh aircraft. The current Edge smoke check passed all routes, including city and route selection, the retrained forecast and alert actions. Older results below describe the earlier audit.
 
 ## Runtime and repository
 

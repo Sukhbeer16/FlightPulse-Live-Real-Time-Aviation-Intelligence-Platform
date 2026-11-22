@@ -135,6 +135,11 @@ export interface FlightTrack {
 // ── Alerts Center ─────────────────────────────
 
 export interface AviationAlert {
+  alertType?: string;
+  updatedAt?: string | null;
+  acknowledgedAt?: string | null;
+  resolvedAt?: string | null;
+  evidenceTime?: string | null;
   source?: string;
   deliveryStatus?: string;
   deliveryError?: string | null;

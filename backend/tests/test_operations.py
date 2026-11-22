@@ -35,6 +35,19 @@ def test_public_adsb_conversion_preserves_source_and_units(monkeypatch):
     assert Observation(version=1,source='adsb_lol',source_time=timestamp,state=states[0]).source=='adsb_lol'
 
 
+def test_producer_rejects_unacknowledged_kafka_delivery():
+    class FailedProducer:
+        def produce(self, topic, key, value, on_delivery):
+            on_delivery(RuntimeError('broker unavailable'), None)
+        def poll(self, timeout):
+            pass
+        def flush(self, timeout):
+            return 0
+    observation=event()
+    with pytest.raises(RuntimeError, match='Kafka delivery incomplete'):
+        producer.publish(FailedProducer(),'opensky',observation.source_time,[observation.state])
+
+
 def test_forecast_rejects_same_airport():
     response=client.post('/api/v1/predictions/delay',json={'reporting_airline':'AA','origin':'JFK','destination':'jfk','flight_date':'2024-02-01'})
     assert response.status_code==422
@@ -159,3 +172,52 @@ def test_delivery_persists_failure_and_success_without_losing_ack(tmp_path,monke
     assert rows[0].delivery_status=='sent'
     assert messages[0]['To']=='to@example.test'
     assert alert_delivery.deliver_pending(send=messages.append) is False
+
+
+def test_dataset_map_coverage_uses_source_airports_and_pagination():
+    first=client.get('/api/v1/historical/map-coverage?page_size=2')
+    assert first.status_code==200
+    body=first.json()
+    assert body['flights']==1_066_492
+    assert body['airport_count']>=300 and body['city_count']>=300
+    assert body['route_count']>5000 and len(body['routes'])==2
+    assert body['mapped_flights']<=body['flights']
+    assert body['routes'][0]['origin_coordinates']
+    second=client.get('/api/v1/historical/map-coverage?page=2&page_size=2').json()
+    assert second['routes'][0]!=body['routes'][0]
+    city=client.get('/api/v1/historical/map-coverage?city=Atlanta%2C%20GA&page_size=2').json()
+    assert city['flights']>0
+    assert all('Atlanta, GA' in (r['origin_city'],r['destination_city']) for r in city['routes'])
+
+
+def test_delay_explanation_reports_only_recorded_causes():
+    rows,_=processed_historical.search_processed_flights(page=1,page_size=1,delayed=True)
+    row=rows[0]
+    result=client.get('/api/v1/historical/delay-explanation',params={
+        'source_file':row.source_file,'source_row_number':row.source_row_number})
+    assert result.status_code==200
+    body=result.json()
+    assert body['arrival_delay_minutes']==row.arrival_delay_minutes
+    assert body['provenance']['source_row_number']==row.source_row_number
+    assert all(cause['minutes']>0 for cause in body['reported_causes'])
+    if body['reported_causes']:
+        assert sum(cause['minutes'] for cause in body['reported_causes'])==body['total_reported_cause_minutes']
+    else:
+        assert body['status']=='not_reported'
+        assert body['total_reported_cause_minutes'] is None
+
+
+def test_alert_full_counts_filters_and_lifecycle():
+    observation=event()
+    alerts.create_observation_alert(observation)
+    counts=client.get('/api/v1/alerts/counts').json()
+    assert counts['by_status']['open']==1
+    listing=client.get('/api/v1/alerts?include_demo=false&alert_type=telemetry_review&status=open&search=TEST123').json()
+    assert listing['pagination']['total']==1
+    alert_id=listing['data'][0]['id']
+    acknowledged=client.patch('/api/v1/alerts/'+alert_id,json={'status':'acknowledged'}).json()
+    assert acknowledged['acknowledged_at'] and acknowledged['updated_at']
+    resolved=client.patch('/api/v1/alerts/'+alert_id,json={'status':'resolved'}).json()
+    assert resolved['resolved_at']
+    alerts.create_observation_alert(observation)
+    assert client.get('/api/v1/alerts/counts').json()['by_status']['resolved']==1

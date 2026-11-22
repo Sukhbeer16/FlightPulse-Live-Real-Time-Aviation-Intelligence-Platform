@@ -36,7 +36,10 @@ def _read(paths):
                             except (ValueError, TypeError):
                                 continue
                             airports[row["AIRPORT_SEQ_ID"]] = {
-                                "name": row["DISPLAY_AIRPORT_NAME"], "coordinates": (lon, lat),
+                                "name": row["DISPLAY_AIRPORT_NAME"],
+                                "city": row["DISPLAY_AIRPORT_CITY_NAME_FULL"] or None,
+                                "city_market": row["DISPLAY_CITY_MARKET_NAME_FULL"] or None,
+                                "coordinates": (lon, lat),
                             }
         except (OSError, BadZipFile, KeyError, UnicodeError):
             continue
