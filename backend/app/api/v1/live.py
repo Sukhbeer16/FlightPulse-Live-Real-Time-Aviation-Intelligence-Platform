@@ -120,3 +120,26 @@ def live_provider_status():
     from backend.app.config.settings import get_settings
     settings = get_settings()
     return {**provider_status, "oauth_configured": bool(settings.opensky_client_id and settings.opensky_client_secret)}
+
+
+@router.get(
+    "/predictions",
+    summary="Get real-time ML delay predictions streamed from Kafka",
+    description="Retrieve live pre-departure and in-flight delay predictions generated from Kafka streaming events.",
+)
+def live_stream_predictions(
+    limit: Annotated[int, Query(ge=1, le=200, description="Maximum predictions to return")] = 50,
+    flight_id: Annotated[str | None, Query(description="Filter by aircraft ICAO24 hex code")] = None,
+):
+    from backend.app.streaming.store import latest_predictions
+    return {"predictions": latest_predictions(limit=limit, flight_id=flight_id)}
+
+
+@router.get(
+    "/predictions/metrics",
+    summary="Get streaming ML prediction monitoring metrics",
+    description="Operational health metrics: total predictions, delayed ratio, mean latency, mean probability, and rejected messages.",
+)
+def live_prediction_metrics():
+    from backend.app.streaming.store import prediction_metrics_summary
+    return prediction_metrics_summary()

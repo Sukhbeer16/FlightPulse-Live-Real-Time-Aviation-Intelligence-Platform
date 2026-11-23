@@ -33,7 +33,7 @@ auto.create.topics.enable=false
     }
     & $java -Xms128m -Xmx384m -cp $lib kafka.Kafka $config
 } elseif ($Action -eq 'topics') {
-    foreach ($topic in 'flight-states','flight-anomalies','flight-alerts') {
+    foreach ($topic in 'flight-states','flight-predictions','flight-anomalies','flight-alerts') {
         & $java -cp $lib org.apache.kafka.tools.TopicCommand --bootstrap-server 127.0.0.1:9092 --create --if-not-exists --topic $topic --partitions 1 --replication-factor 1
         if ($LASTEXITCODE) { throw "Failed to create $topic" }
     }

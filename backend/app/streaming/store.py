@@ -1,10 +1,12 @@
 """Atomic microbatch sink. Kafka offsets and aircraft observation keys survive replays."""
 
+import json
 import sqlite3
 from contextlib import closing
+from typing import Any
 from pydantic import ValidationError
 from backend.app.config.settings import get_settings
-from backend.app.streaming.event import Observation
+from backend.app.streaming.event import Observation, FlightPredictionEvent
 
 
 def database():
@@ -179,4 +181,104 @@ def summary(source):
         "status": "available",
         "source": source,
         "windows": [dict(row) for row in windows],
+    }
+
+
+def predictions_database():
+    return get_settings().data_directory / "streaming" / "predictions.sqlite"
+
+
+def store_prediction(event: FlightPredictionEvent) -> None:
+    path = predictions_database()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path, timeout=10)) as db, db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("""CREATE TABLE IF NOT EXISTS flight_predictions (
+            flight_id TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            prediction INTEGER NOT NULL,
+            predicted_class TEXT NOT NULL,
+            delay_probability REAL NOT NULL,
+            threshold REAL NOT NULL,
+            model_id TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            prediction_timestamp TEXT NOT NULL,
+            callsign TEXT,
+            source TEXT NOT NULL,
+            latency_ms REAL NOT NULL,
+            payload TEXT NOT NULL
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_predictions_time ON flight_predictions(timestamp DESC)")
+        db.execute("""INSERT OR REPLACE INTO flight_predictions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            event.flight_id,
+            event.timestamp,
+            event.prediction,
+            event.predicted_class,
+            event.delay_probability,
+            event.threshold,
+            event.model_id,
+            event.model_version,
+            event.prediction_timestamp,
+            event.callsign,
+            event.source,
+            event.latency_ms,
+            event.model_dump_json(),
+        ))
+
+
+def store_rejected_prediction(partition: int, offset: int, reason: str, payload: bytes | None) -> None:
+    path = predictions_database()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path, timeout=10)) as db, db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("""CREATE TABLE IF NOT EXISTS rejected_prediction_events (
+            partition INTEGER,
+            offset INTEGER,
+            reason TEXT,
+            payload BLOB,
+            rejected_at REAL,
+            PRIMARY KEY(partition, offset)
+        )""")
+        import time
+        db.execute("INSERT OR REPLACE INTO rejected_prediction_events VALUES(?,?,?,?,?)",
+                   (partition, offset, reason, payload, time.time()))
+
+
+def latest_predictions(limit: int = 50, flight_id: str | None = None) -> list[dict[str, Any]]:
+    path = predictions_database()
+    if not path.is_file():
+        return []
+    with closing(sqlite3.connect(path, timeout=5)) as db:
+        db.row_factory = sqlite3.Row
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='flight_predictions'").fetchone():
+            return []
+        if flight_id:
+            rows = db.execute("SELECT payload FROM flight_predictions WHERE flight_id=? ORDER BY timestamp DESC LIMIT ?", (flight_id, limit)).fetchall()
+        else:
+            rows = db.execute("SELECT payload FROM flight_predictions ORDER BY timestamp DESC LIMIT ?", (limit,)).fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
+def prediction_metrics_summary() -> dict[str, Any]:
+    path = predictions_database()
+    if not path.is_file():
+        return {"total_predictions": 0, "delayed_count": 0, "non_delayed_count": 0, "delayed_ratio": 0.0, "mean_delay_probability": 0.0, "mean_latency_ms": 0.0, "rejected_events": 0}
+    with closing(sqlite3.connect(path, timeout=5)) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='flight_predictions'").fetchone():
+            return {"total_predictions": 0, "delayed_count": 0, "non_delayed_count": 0, "delayed_ratio": 0.0, "mean_delay_probability": 0.0, "mean_latency_ms": 0.0, "rejected_events": 0}
+        total = db.execute("SELECT count(*) FROM flight_predictions").fetchone()[0]
+        delayed = db.execute("SELECT count(*) FROM flight_predictions WHERE prediction=1").fetchone()[0]
+        avg_prob = db.execute("SELECT avg(delay_probability) FROM flight_predictions").fetchone()[0] or 0.0
+        avg_lat = db.execute("SELECT avg(latency_ms) FROM flight_predictions").fetchone()[0] or 0.0
+        rejected = 0
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='rejected_prediction_events'").fetchone():
+            rejected = db.execute("SELECT count(*) FROM rejected_prediction_events").fetchone()[0]
+    return {
+        "total_predictions": total,
+        "delayed_count": delayed,
+        "non_delayed_count": total - delayed,
+        "delayed_ratio": round(delayed / total, 4) if total > 0 else 0.0,
+        "mean_delay_probability": round(float(avg_prob), 4),
+        "mean_latency_ms": round(float(avg_lat), 2),
+        "rejected_events": rejected,
     }

@@ -47,6 +47,11 @@ def ingest(key, value, partition, offset):
     if event:
         # Replay also repairs an interrupted alert write; the alert ID is deterministic.
         create_observation_alert(event)
+        try:
+            from backend.app.streaming.prediction_consumer import process_message as process_prediction
+            process_prediction(key, value, partition, offset)
+        except Exception:
+            pass
 
 
 def main():
