@@ -28,13 +28,10 @@ React + TypeScript UI <------ FastAPI backend API <----------+
 ```
 
 The diagram shows logical responsibilities, not a requirement to deploy all
-components at once. The current API separates live ADS-B observations,
-historical BTS records and compact historical aggregates. The optional local
-Kafka path publishes provider observations and persists them through either
-the lightweight consumer or Spark. Delay predictions remain experimental;
-telemetry review alerts and source-backed historical alerts have distinct
-meanings. The package directories remain boundaries rather than a requirement
-to deploy additional services.
+components at once. The initial implementation contains a FastAPI health
+endpoint and a UI health check. The package directories establish boundaries
+for future code; they do not imply that integrations or data sources are
+already implemented.
 
 ## Initial application
 
